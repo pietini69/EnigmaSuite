@@ -1,0 +1,15 @@
+wing: enigmasuite
+rooms:
+- name: enigmasuite
+  description: Files from EnigmaSuite/
+  keywords:
+  - enigmasuite
+  - enigmasuite
+- name: enigmasuite.xcodeproj
+  description: Files from EnigmaSuite.xcodeproj/
+  keywords:
+  - enigmasuite.xcodeproj
+  - enigmasuite.xcodeproj
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []

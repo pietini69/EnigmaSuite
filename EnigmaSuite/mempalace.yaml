@@ -1,0 +1,10 @@
+wing: enigmasuite
+rooms:
+- name: assets.xcassets
+  description: Files from Assets.xcassets/
+  keywords:
+  - assets.xcassets
+  - assets.xcassets
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []
