@@ -1448,6 +1448,12 @@ final class EnigmaBoxService {
             case done
         }
         
+        // Tuloste rajataan merkeillä. Kaiku ja kehotteet sammutetaan, jotta tulosteessa on vain
+        // komennon oma tuloste (pääte toistaisi muuten jokaisen rivin, esim. "echo OK" -tarkistukset).
+        // Lainausmerkit pitävät alkumerkin poissa kaiusta, ja merkit ovat omilla riveillään,
+        // jotta myös heredoc-komennot toimivat.
+        let wrappedCommand = "stty -echo 2>/dev/null; PS1=''; PS2=''; echo __ES_\"\"BEGIN__\n\(command)\necho \"__ES_END_$?__\"\n"
+
         return await withCheckedContinuation { continuation in
             let queue = DispatchQueue(label: "enigmasuite.telnet.exec")
             var isResumed = false
@@ -1459,13 +1465,7 @@ final class EnigmaBoxService {
                 if !isResumed {
                     isResumed = true
                     connection.cancel()
-                    // Siistitään tuloste: poistetaan mahdollinen komennon kaiku ja rivinvaihdot
-                    var clean = commandOutput
-                        .replacingOccurrences(of: "\r\r\n", with: "\n")
-                        .replacingOccurrences(of: "\r\n", with: "\n")
-                    if clean.hasPrefix(command) {
-                        clean = String(clean.dropFirst(command.count)).trimmingCharacters(in: .whitespacesAndNewlines)
-                    }
+                    let clean = Self.extractMarkedOutput(commandOutput)
                     continuation.resume(returning: (success, clean.isEmpty && success ? "(Komento suoritettu)" : clean))
                 }
             }
@@ -1516,34 +1516,34 @@ final class EnigmaBoxService {
                                 state = .waitingForPrompt
                                 buffer = ""
                                 send("\(pass)\n")
-                            } else if lower.contains("root@") || buffer.contains("~#") || buffer.contains("# ") || buffer.contains("$ ") {
+                            } else if Self.looksLikePrompt(buffer) {
                                 state = .waitingForCommandResult
                                 buffer = ""
                                 commandOutput = ""
-                                send("\(command)\n")
+                                send(wrappedCommand)
                             }
                         case .waitingForPassword:
                             if lower.contains("password:") {
                                 state = .waitingForPrompt
                                 buffer = ""
                                 send("\(pass)\n")
-                            } else if lower.contains("root@") || buffer.contains("~#") || buffer.contains("# ") || buffer.contains("$ ") {
+                            } else if Self.looksLikePrompt(buffer) {
                                 state = .waitingForCommandResult
                                 buffer = ""
                                 commandOutput = ""
-                                send("\(command)\n")
+                                send(wrappedCommand)
                             }
                         case .waitingForPrompt:
-                            if lower.contains("root@") || buffer.contains("~#") || buffer.contains("# ") || buffer.contains("$ ") {
+                            if Self.looksLikePrompt(buffer) {
                                 state = .waitingForCommandResult
                                 buffer = ""
                                 commandOutput = ""
-                                send("\(command)\n")
+                                send(wrappedCommand)
                             }
                         case .waitingForCommandResult:
+                            // Valmis vasta kun loppumerkki näkyy: bannerit tai tulosteen "$ "/"# " eivät päätä komentoa
                             commandOutput += text
-                            let outLower = commandOutput.lowercased()
-                            if outLower.contains("root@") || commandOutput.contains("~#") || commandOutput.contains("# ") || commandOutput.contains("$ ") {
+                            if Self.containsEndMarker(commandOutput) {
                                 state = .done
                                 finish(success: true)
                                 return
@@ -1575,6 +1575,35 @@ final class EnigmaBoxService {
         }
     }
     
+    /// Kehote tunnistetaan vain puskurin viimeiseltä riviltä (esim. "root@box:~# ").
+    /// Bannerien ASCII-taiteessa (esim. VTi:n "$$") on muuten "$ "-merkkejä keskellä tekstiä.
+    nonisolated static func looksLikePrompt(_ buffer: String) -> Bool {
+        let lastLine = buffer.components(separatedBy: "\n").last?.replacingOccurrences(of: "\r", with: "") ?? ""
+        return lastLine.hasSuffix("# ") || lastLine.hasSuffix("$ ") || lastLine.hasSuffix("#") || lastLine.hasSuffix("$")
+    }
+
+    nonisolated static func containsEndMarker(_ output: String) -> Bool {
+        output.range(of: "__ES_END_[0-9]+__", options: .regularExpression) != nil
+    }
+
+    /// Palauttaa vain alku- ja loppumerkin välisen tulosteen (ilman komennon kaikua ja kehotteita).
+    nonisolated static func extractMarkedOutput(_ raw: String) -> String {
+        let lines = raw
+            .replacingOccurrences(of: "\r\r\n", with: "\n")
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "")
+            .components(separatedBy: "\n")
+        guard let begin = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "__ES_BEGIN__" }) else {
+            return ""
+        }
+        var body: [String] = []
+        for line in lines[(begin + 1)...] {
+            if line.range(of: "^__ES_END_[0-9]+__$", options: .regularExpression) != nil { break }
+            body.append(line)
+        }
+        return body.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Telnet-komento tilakoneella (Bool palautus)
     func runTelnetCommand(ip: String, command: String, port: Int = 23, timeout: TimeInterval = 12.0, username: String? = nil, password: String? = nil) async -> Bool {
         let (ok, _) = await executeTelnetCommand(ip: ip, command: command, port: port, timeout: timeout, username: username, password: password)
@@ -1639,63 +1668,65 @@ final class EnigmaBoxService {
     
     /// Hakee boksiin liitetyt tallennuslaitteet (USB, HDD jne.)
     func fetchBoxStorageDevices(box: EnigmaBox) async -> [BoxStorageDevice] {
+        // -P: yksi rivi per levy (BusyBox rivittää muuten pitkät laitenimet omalle rivilleen).
+        // Ilman polkuja df ei herätä autofs-/verkkolevyjä, jotka voisivat jumittaa komennon.
         let (success, output) = await executeTelnetCommand(
             ip: box.ip,
-            command: "df -k /media/* /media 2>/dev/null",
-            timeout: 6.0,
+            command: "df -Pk 2>/dev/null",
+            timeout: 8.0,
             username: box.username,
             password: box.password
         )
         guard success else { return [] }
-        
+        return Self.parseStorageDevices(dfOutput: output)
+    }
+
+    static func parseStorageDevices(dfOutput: String) -> [BoxStorageDevice] {
         var devices: [BoxStorageDevice] = []
-        var seenMounts = Set<String>()
-        
-        let lines = output.components(separatedBy: .newlines)
-        for line in lines {
-            let parts = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        var seenDevices = Set<String>()
+        var pending: String?
+
+        for rawLine in dfOutput.components(separatedBy: .newlines) {
+            var parts = rawLine.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+            // Varmuuden vuoksi: rivitetty laitenimi yhdistetään seuraavaan riviin
+            if parts.count == 1 { pending = parts[0]; continue }
+            if let fs = pending, parts.count == 5 { parts.insert(fs, at: 0) }
+            pending = nil
             guard parts.count >= 6 else { continue }
+
             let fs = parts[0]
-            let mount = parts[5]
-            
-            // Suodatetaan virtuaaliosiot pois
-            guard !fs.contains("tmpfs") && !fs.contains("autofs") && !fs.contains("none") && !fs.contains("udev") else { continue }
-            guard mount.hasPrefix("/media") && mount != "/media" else { continue }
-            guard !seenMounts.contains(mount) else { continue }
-            seenMounts.insert(mount)
-            
-            guard let totalKb = Int64(parts[1]),
-                  let availKb = Int64(parts[3]) else { continue }
-            
-            let usedPercentStr = parts[4].replacingOccurrences(of: "%", with: "")
-            let usedPercent = Int(usedPercentStr) ?? 0
-            
-            let totalBytes = totalKb * 1024
-            let availBytes = availKb * 1024
-            
-            let friendlyName: String
+            let mount = parts[5...].joined(separator: " ")
+            guard mount.hasPrefix("/media/") else { continue }
+            guard !["tmpfs", "devtmpfs", "autofs", "none", "udev", "overlay"].contains(fs) else { continue }
+            guard let totalKb = Int64(parts[1]), let availKb = Int64(parts[3]), totalKb > 0 else { continue }
+
+            // Sama levy voi olla liitettynä kahteen kohtaan (esim. /media/hdd ja /media/sda1)
+            guard !seenDevices.contains(fs) else { continue }
+            seenDevices.insert(fs)
+
+            let usedPercent = Int(parts[4].replacingOccurrences(of: "%", with: "")) ?? 0
             let lastPart = mount.components(separatedBy: "/").last ?? ""
+            let friendlyName: String
             if lastPart.lowercased().contains("hdd") {
                 friendlyName = "Kiintolevy (HDD)"
             } else if lastPart.lowercased().contains("usb") {
                 friendlyName = "USB-muisti (\(lastPart))"
             } else if fs.contains("sd") {
-                let devName = fs.components(separatedBy: "/").last ?? ""
-                friendlyName = "USB-tallennusväline (\(devName))"
+                friendlyName = "USB-tallennusväline (\(fs.components(separatedBy: "/").last ?? ""))"
             } else {
                 friendlyName = "Tallennusväline (\(lastPart))"
             }
-            
+
             devices.append(BoxStorageDevice(
                 name: friendlyName,
                 mountPoint: mount,
                 device: fs,
-                totalBytes: totalBytes,
-                availableBytes: availBytes,
+                totalBytes: totalKb * 1024,
+                availableBytes: availKb * 1024,
                 usedPercent: usedPercent
             ))
         }
-        
+
         return devices.sorted(by: { $0.availableBytes > $1.availableBytes })
     }
     
@@ -1762,63 +1793,90 @@ final class EnigmaBoxService {
         return (currentSlot, resultSlots)
     }
     
-    /// Hakee tallennuslaitteilta löytyvät valmiit image-varmuuskopiot
+    /// Hakee tallennuslaitteilta valmiit image-varmuuskopiot: zip-paketit sekä purettuina
+    /// kansioina tallennetut (esim. VTi:n oma "vti-image-backup" tai EnigmaSuiten zip-vapaa varmuuskopio).
     func fetchBoxImageBackups(box: EnigmaBox, storageDevices: [BoxStorageDevice]) async -> [ImageBackupItem] {
+        guard !storageDevices.isEmpty else { return [] }
+        let mounts = storageDevices.map { "'\($0.mountPoint)'" }.joined(separator: " ")
+        // Tulosteen rivit: Z|koko tavuina|aika|polku tai D|koko kt|aika|kansio. Toimii myös BusyBox 1.2x:ssä.
+        let cmd = """
+        for M in \(mounts); do \
+        find "$M" -maxdepth 3 -type f -name '*.zip' 2>/dev/null | grep -v -e '/flash_tmp/' -e '/movie/' -e '/.work_' | while read F; do \
+        echo "Z|$(ls -ln "$F" | awk '{print $5}')|$(date -r "$F" +%s 2>/dev/null)|$F"; done; \
+        find "$M" -maxdepth 6 -type f \\( -name kernel_auto.bin -o -name kernel.bin -o -name vmlinux.bin \\) 2>/dev/null | grep -v -e '/flash_tmp/' -e '/movie/' -e '/.work_' | while read K; do \
+        D=$(dirname "$K"); ls "$D"/rootfs.* >/dev/null 2>&1 || continue; P=$(dirname "$D"); \
+        case "$(basename "$P")" in vuplus|gigablue|zgemma|dreambox|edision|octagon|xtrend|formuler|dinobot|axas|maxytec|uclan|mutant|ceryon|airdigital|gfutures|hd|ini|xp|protek|wetek|beyonwiz|abcom|clap|dags|ustym) R=$(dirname "$P");; *) R="$P";; esac; \
+        echo "D|$(du -sk "$R" | awk '{print $1}')|$(date -r "$K" +%s 2>/dev/null)|$R"; done; \
+        done | sort -u
+        """
+        let (success, output) = await executeTelnetCommand(
+            ip: box.ip,
+            command: cmd,
+            timeout: 15.0,
+            username: box.username,
+            password: box.password
+        )
+        guard success else { return [] }
+
         var items: [ImageBackupItem] = []
-        
-        for dev in storageDevices {
-            let cmd = "ls -l --full-time \(dev.mountPoint)/imagebackups/*.zip 2>/dev/null || ls -l \(dev.mountPoint)/imagebackups/*.zip 2>/dev/null"
-            let (success, output) = await executeTelnetCommand(
-                ip: box.ip,
-                command: cmd,
-                timeout: 5.0,
-                username: box.username,
-                password: box.password
-            )
-            guard success else { continue }
-            
-            let lines = output.components(separatedBy: .newlines)
-            for line in lines {
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard trimmed.hasPrefix("-") && trimmed.contains(".zip") else { continue }
-                
-                let parts = trimmed.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-                guard parts.count >= 6 else { continue }
-                guard let size = Int64(parts[4]) else { continue }
-                let fullPath = parts.last ?? ""
-                guard fullPath.hasSuffix(".zip") else { continue }
-                
-                let fileName = fullPath.components(separatedBy: "/").last ?? fullPath
-                
-                var date: Date? = nil
-                let regex = try? NSRegularExpression(pattern: "(\\d{8}_\\d{4,6})", options: [])
-                if let match = regex?.firstMatch(in: fileName, range: NSRange(fileName.startIndex..., in: fileName)),
-                   let r = Range(match.range(at: 1), in: fileName) {
-                    let ds = String(fileName[r])
-                    let df = DateFormatter()
-                    df.dateFormat = ds.count == 15 ? "yyyyMMdd_HHmmss" : "yyyyMMdd_HHmm"
-                    date = df.date(from: ds)
-                }
-                
-                items.append(ImageBackupItem(
-                    fileName: fileName,
-                    remotePath: fullPath,
-                    sizeBytes: size,
-                    creationDate: date ?? Date(),
-                    mountPoint: dev.mountPoint
-                ))
+        var seen = Set<String>()
+        for line in output.components(separatedBy: .newlines) {
+            let parts = line.split(separator: "|", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 4, parts[0] == "Z" || parts[0] == "D" else { continue }
+            let isFolder = parts[0] == "D"
+            let path = parts[3].trimmingCharacters(in: .whitespaces)
+            guard !path.isEmpty, !seen.contains(path), let size = Int64(parts[1]) else { continue }
+            seen.insert(path)
+
+            let fileName = path.components(separatedBy: "/").last ?? path
+            var date = TimeInterval(parts[2]).map { Date(timeIntervalSince1970: $0) }
+            if date == nil || date! < Date(timeIntervalSince1970: 86_400 * 365) {
+                date = Self.dateFromBackupName(fileName) ?? date
             }
+            let mountPoint = storageDevices.first(where: { path.hasPrefix($0.mountPoint + "/") })?.mountPoint ?? ""
+
+            items.append(ImageBackupItem(
+                fileName: fileName,
+                remotePath: path,
+                sizeBytes: isFolder ? size * 1024 : size,
+                creationDate: date,
+                mountPoint: mountPoint,
+                isFolder: isFolder
+            ))
         }
-        
+
         return items.sorted(by: { ($0.creationDate ?? Date.distantPast) > ($1.creationDate ?? Date.distantPast) })
     }
+
+    /// Päivämäärä tiedoston nimestä: 20260801_1401(32) tai 2026-08-01_14-01-32
+    nonisolated static func dateFromBackupName(_ name: String) -> Date? {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let patterns: [(String, (String) -> String?)] = [
+            ("\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}(-\\d{2})?", { $0.count == 19 ? "yyyy-MM-dd_HH-mm-ss" : "yyyy-MM-dd_HH-mm" }),
+            ("\\d{8}_\\d{4,6}", { $0.count == 15 ? "yyyyMMdd_HHmmss" : ($0.count == 13 ? "yyyyMMdd_HHmm" : nil) })
+        ]
+        for (pattern, format) in patterns {
+            guard let range = name.range(of: pattern, options: .regularExpression) else { continue }
+            let text = String(name[range])
+            if let f = format(text) {
+                df.dateFormat = f
+                if let d = df.date(from: text) { return d }
+            }
+        }
+        return nil
+    }
     
-    /// Poistaa varmuuskopion boksista
-    func deleteBoxImageBackup(box: EnigmaBox, remotePath: String) async -> Bool {
+    /// Poistaa varmuuskopion boksista (zip-tiedosto tai purettu varmuuskopiokansio)
+    func deleteBoxImageBackup(box: EnigmaBox, item: ImageBackupItem) async -> Bool {
+        let path = item.remotePath
+        // Kansio poistetaan vain, jos se on selvästi tallennuslaitteella oleva varmuuskopio
+        let depth = path.split(separator: "/").count
+        guard path.hasPrefix("/media/"), !path.contains(".."), !path.contains("'"), depth >= 3 else { return false }
         let (ok, _) = await executeTelnetCommand(
             ip: box.ip,
-            command: "rm -f '\(remotePath)'",
-            timeout: 5.0,
+            command: item.isFolder ? "rm -rf '\(path)'" : "rm -f '\(path)'",
+            timeout: 10.0,
             username: box.username,
             password: box.password
         )
@@ -1848,8 +1906,12 @@ final class EnigmaBoxService {
         box: EnigmaBox,
         remotePath: String,
         localDestination: URL,
+        isFolder: Bool = false,
         onProgress: @escaping (Double) -> Void
     ) async -> (success: Bool, error: String?) {
+        if isFolder {
+            return await downloadImageBackupFolder(box: box, remotePath: remotePath, localDestination: localDestination, onProgress: onProgress)
+        }
         await ensureFTPAllowed(box: box)
         let cred = await ftpCredentials(ip: box.ip, username: box.username, password: box.password)
         let cleanPath = remotePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -1895,6 +1957,78 @@ final class EnigmaBoxService {
         }
     }
     
+    /// Lataa purettuna tallennetun varmuuskopiokansion tiedosto kerrallaan (FTP) ja pakkaa sen
+    /// Macilla flashattavaksi zipiksi (sama rakenne kuin kansiossa, esim. vuplus/duo4kse/...).
+    private func downloadImageBackupFolder(
+        box: EnigmaBox,
+        remotePath: String,
+        localDestination: URL,
+        onProgress: @escaping (Double) -> Void
+    ) async -> (success: Bool, error: String?) {
+        let (listed, listing) = await executeTelnetCommand(
+            ip: box.ip,
+            command: "cd '\(remotePath)' && find . -type f ! -name '.DS_Store' ! -name '._*' | while read F; do echo \"F|$(ls -ln \"$F\" | awk '{print $5}')|$F\"; done",
+            timeout: 10.0,
+            username: box.username,
+            password: box.password
+        )
+        let files: [(path: String, size: Int64)] = listing.components(separatedBy: .newlines).compactMap { line in
+            let parts = line.split(separator: "|", maxSplits: 2).map(String.init)
+            guard parts.count == 3, parts[0] == "F", let size = Int64(parts[1]) else { return nil }
+            return (String(parts[2].dropFirst(parts[2].hasPrefix("./") ? 2 : 0)), size)
+        }
+        guard listed, !files.isEmpty else {
+            return (false, "Varmuuskopiokansion tiedostoja ei saatu luettua boksista.")
+        }
+
+        let staging = FileManager.default.temporaryDirectory.appendingPathComponent("enigmasuite_\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: staging) }
+
+        await ensureFTPAllowed(box: box)
+        let cred = await ftpCredentials(ip: box.ip, username: box.username, password: box.password)
+        let totalBytes = max(files.reduce(0) { $0 + $1.size }, 1)
+        var doneBytes: Int64 = 0
+
+        for file in files {
+            let local = staging.appendingPathComponent(file.path)
+            try? FileManager.default.createDirectory(at: local.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let remote = (remotePath + "/" + file.path).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let encoded = remote.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? remote
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+            proc.arguments = ["-s", "--connect-timeout", "10", "ftp://\(cred)@\(box.ip)//\(encoded)", "-o", local.path]
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+            } catch {
+                return (false, "Latauksen käynnistys epäonnistui: \(error.localizedDescription)")
+            }
+            guard proc.terminationStatus == 0 else {
+                return (false, "Tiedoston \(file.path) lataus epäonnistui (curl-koodi \(proc.terminationStatus))")
+            }
+            doneBytes += file.size
+            onProgress(min(Double(doneBytes) / Double(totalBytes), 1.0) * 0.9)
+        }
+
+        // Pakataan Macilla: zip-paketin juuressa on kansion sisältö (esim. vuplus/duo4kse/)
+        try? FileManager.default.removeItem(at: localDestination)
+        let zip = Process()
+        zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        zip.currentDirectoryURL = staging
+        zip.arguments = ["-r", "-q", localDestination.path, "."]
+        do {
+            try zip.run()
+            zip.waitUntilExit()
+        } catch {
+            return (false, "Zip-paketin luonti epäonnistui: \(error.localizedDescription)")
+        }
+        guard zip.terminationStatus == 0 else {
+            return (false, "Zip-paketin luonti epäonnistui (koodi \(zip.terminationStatus))")
+        }
+        onProgress(1.0)
+        return (true, nil)
+    }
+
     /// Luo uuden täyden varmuuskopion boksille
     func createFullImageBackup(
         box: EnigmaBox,
@@ -1940,7 +2074,8 @@ fi
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_NAME="${DISTRO}-${VERSION}-${MODEL}-backup-${TIMESTAMP}"
-WORK_DIR="/tmp/backup_work_${TIMESTAMP}"
+# Työkansio kohdelevylle: /tmp on monissa bokseissa pieni RAM-levy
+WORK_DIR="${DEST_DIR}/.work_${TIMESTAMP}"
 IMAGE_DIR="${WORK_DIR}/${BRAND}/${SUBFOLDER}"
 
 echo "STATUS:INFO:0.10:Malli: ${MODEL} (${BRAND}), Image: ${DISTRO} ${VERSION}" > "$STATUS_FILE"
@@ -1962,7 +2097,13 @@ if [ -z "$KERNEL_DEV" ] && [ -e "/dev/disk/by-partlabel/linuxkernel1" ]; then
     KERNEL_DEV="/dev/disk/by-partlabel/linuxkernel1"
 elif [ -z "$KERNEL_DEV" ] && [ -e "/dev/kernel" ]; then
     KERNEL_DEV="/dev/kernel"
+elif [ -z "$KERNEL_DEV" ] && [ -e "/dev/disk/by-partlabel/kernel" ]; then
+    KERNEL_DEV="/dev/disk/by-partlabel/kernel"
 fi
+
+# Vu+ 4K -mallien initrd- ja splash-osiot (kuten boksin oma image-varmuuskopio)
+[ -e "/dev/disk/by-partlabel/initrd" ] && dd if="/dev/disk/by-partlabel/initrd" of="${IMAGE_DIR}/initrd_auto.bin" bs=1M 2>> "$LOG_FILE"
+[ -e "/dev/disk/by-partlabel/splash" ] && dd if="/dev/disk/by-partlabel/splash" of="${IMAGE_DIR}/splash_auto.bin" bs=1M 2>> "$LOG_FILE"
 
 if [ -n "$KERNEL_DEV" ]; then
     dd if="$KERNEL_DEV" of="${IMAGE_DIR}/kernel_auto.bin" bs=1M 2>> "$LOG_FILE"
@@ -2004,15 +2145,23 @@ rmdir "$BIND_DIR" 2>/dev/null || true
 echo "STATUS:ZIP:0.85:Luodaan zip-palautuspaketti..." > "$STATUS_FILE"
 ZIP_FILE="${DEST_DIR}/${BACKUP_NAME}.zip"
 cd "$WORK_DIR"
-zip -r "$ZIP_FILE" "$BRAND" >> "$LOG_FILE" 2>&1
-
+# Kaikissa imageissa ei ole zip-komentoa (esim. VTi): varalla Pythonin zipfile
+if command -v zip >/dev/null 2>&1; then
+    zip -r "$ZIP_FILE" "$BRAND" >> "$LOG_FILE" 2>&1 || rm -f "$ZIP_FILE"
+elif PY=$(command -v python3 || command -v python); then
+    "$PY" -m zipfile -c "$ZIP_FILE" "$BRAND" >> "$LOG_FILE" 2>&1 || rm -f "$ZIP_FILE"
+fi
 cd /
-rm -rf "$WORK_DIR"
 
 if [ -f "$ZIP_FILE" ]; then
+    rm -rf "$WORK_DIR"
     ZIP_SIZE=$(ls -lh "$ZIP_FILE" | awk '{print $5}')
     echo "STATUS:DONE:1.0:Varmuuskopio valmis: ${BACKUP_NAME}.zip (${ZIP_SIZE})" > "$STATUS_FILE"
+elif mv "$WORK_DIR" "${DEST_DIR}/${BACKUP_NAME}"; then
+    # Ilman zip-työkalua varmuuskopio jää purettuna kansioksi, joka kelpaa myös Flashiin
+    echo "STATUS:DONE:1.0:Varmuuskopio valmis kansiona: ${BACKUP_NAME}" > "$STATUS_FILE"
 else
+    rm -rf "$WORK_DIR"
     echo "STATUS:ERROR:0.0:Varmuuskopion pakkaaminen epäonnistui." > "$STATUS_FILE"
 fi
 EOF
@@ -2041,11 +2190,11 @@ rm -f /tmp/enigmasuite_backup.status /tmp/enigmasuite_backup.log
             password: box.password
         )
         
-        // 3. Seurataan tilatiedostoa silmukassa (max 8 min)
+        // 3. Seurataan tilatiedostoa silmukassa (max 20 min: bzip2-pakkaus on hidas boksin prosessorilla)
         let startTime = Date()
         var currentProgress: Double = 0.05
         
-        while Date().timeIntervalSince(startTime) < 480 {
+        while Date().timeIntervalSince(startTime) < 1200 {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             
             let (_, statusContent) = await executeTelnetCommand(
@@ -2078,7 +2227,7 @@ rm -f /tmp/enigmasuite_backup.status /tmp/enigmasuite_backup.log
             }
         }
         
-        return (false, "Aikakatkaisu: varmuuskopiointi kesti yli 8 minuuttia.")
+        return (false, "Aikakatkaisu: varmuuskopiointi kesti yli 20 minuuttia.")
     }
     
     /// Asentaa imagen (Flash) valittuun slotiin
@@ -2090,6 +2239,18 @@ rm -f /tmp/enigmasuite_backup.status /tmp/enigmasuite_backup.log
         rebootAfter: Bool,
         onProgress: @escaping (String, Double) -> Void
     ) async -> (success: Bool, message: String) {
+        // Flash kirjoittaa imagen ofgwritella; tarkistetaan ennen kuin siirretään satoja megatavuja turhaan
+        let (_, toolCheck) = await executeTelnetCommand(
+            ip: box.ip,
+            command: "[ -x /usr/bin/ofgwrite ] && echo OFGWRITE_OK || echo OFGWRITE_MISSING",
+            timeout: 6.0,
+            username: box.username,
+            password: box.password
+        )
+        if !toolCheck.components(separatedBy: .newlines).contains(where: { $0.trimmingCharacters(in: .whitespaces) == "OFGWRITE_OK" }) {
+            return (false, "Boksista puuttuu ofgwrite-ohjelma, jota imagen asennus tarvitsee. Asenna se boksin pakettienhallinnasta (opkg install ofgwrite) tai asenna image boksin omalla flash-toiminnolla.")
+        }
+
         let workDir = "\(storage.mountPoint)/imagebackups/flash_tmp"
         _ = await executeTelnetCommand(ip: box.ip, command: "mkdir -p '\(workDir)'", timeout: 4.0, username: box.username, password: box.password)
         
@@ -2138,17 +2299,22 @@ REBOOT_AFTER="$4"
 LOG_FILE="/tmp/enigmasuite_flash.log"
 STATUS_FILE="/tmp/enigmasuite_flash.status"
 
-echo "STATUS:UNPACK:0.45:Puretaan image-arkistoa..." > "$STATUS_FILE"
 rm -rf "${WORK_DIR}/extracted"
-mkdir -p "${WORK_DIR}/extracted"
-
-unzip -o "$ZIP_PATH" -d "${WORK_DIR}/extracted" >> "$LOG_FILE" 2>&1
-if [ $? -ne 0 ]; then
-    echo "STATUS:ERROR:0.0:Image-tiedoston purkaminen epäonnistui." > "$STATUS_FILE"
-    exit 1
+if [ -d "$ZIP_PATH" ]; then
+    # Purettuna tallennettu varmuuskopio: käytetään kansiota sellaisenaan
+    SRC_DIR="$ZIP_PATH"
+else
+    echo "STATUS:UNPACK:0.45:Puretaan image-arkistoa..." > "$STATUS_FILE"
+    mkdir -p "${WORK_DIR}/extracted"
+    unzip -o "$ZIP_PATH" -d "${WORK_DIR}/extracted" >> "$LOG_FILE" 2>&1
+    if [ $? -ne 0 ]; then
+        echo "STATUS:ERROR:0.0:Image-tiedoston purkaminen epäonnistui." > "$STATUS_FILE"
+        exit 1
+    fi
+    SRC_DIR="${WORK_DIR}/extracted"
 fi
 
-IMAGE_DIR=$(find "${WORK_DIR}/extracted" -type f \\( -name "kernel_auto.bin" -o -name "vmlinux.bin" -o -name "rootfs.*" \\) -exec dirname {} \\; | head -n 1)
+IMAGE_DIR=$(find "$SRC_DIR" -type f \\( -name "kernel_auto.bin" -o -name "vmlinux.bin" -o -name "rootfs.*" \\) -exec dirname {} \\; | head -n 1)
 
 if [ -z "$IMAGE_DIR" ] || [ ! -d "$IMAGE_DIR" ]; then
     echo "STATUS:ERROR:0.0:Arkistosta ei löytynyt asennettavia tiedostoja (kernel / rootfs)." > "$STATUS_FILE"

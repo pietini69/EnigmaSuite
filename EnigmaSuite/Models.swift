@@ -699,13 +699,16 @@ public struct ImageBackupItem: Identifiable, Hashable {
     public let sizeBytes: Int64
     public let creationDate: Date?
     public let mountPoint: String
+    /// Purettu varmuuskopiokansio (esim. VTi:n oma image-varmuuskopio) zip-tiedoston sijaan
+    public let isFolder: Bool
     
-    public init(fileName: String, remotePath: String, sizeBytes: Int64, creationDate: Date?, mountPoint: String) {
+    public init(fileName: String, remotePath: String, sizeBytes: Int64, creationDate: Date?, mountPoint: String, isFolder: Bool = false) {
         self.fileName = fileName
         self.remotePath = remotePath
         self.sizeBytes = sizeBytes
         self.creationDate = creationDate
         self.mountPoint = mountPoint
+        self.isFolder = isFolder
     }
     
     public var formattedSize: String {

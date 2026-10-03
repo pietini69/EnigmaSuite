@@ -121,7 +121,7 @@ struct ImageManagerView: View {
             Button(l10n.t("Image_BtnDelete"), role: .destructive) {
                 if let item = backupToDelete, let box = state.activeBox {
                     Task {
-                        let ok = await EnigmaBoxService.shared.deleteBoxImageBackup(box: box, remotePath: item.remotePath)
+                        let ok = await EnigmaBoxService.shared.deleteBoxImageBackup(box: box, item: item)
                         if ok {
                             state.showToast("Varmuuskopio poistettu boksista.")
                             await loadBoxData()
@@ -359,7 +359,7 @@ struct ImageManagerView: View {
     // MARK: - Yksittäinen varmuuskopiorivi
     private func backupRow(item: ImageBackupItem) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "doc.zipper")
+            Image(systemName: item.isFolder ? "folder.fill" : "doc.zipper")
                 .foregroundColor(.accentColor)
                 .font(.title2)
             
@@ -812,7 +812,7 @@ struct ImageManagerView: View {
     private func downloadBackupToMac(item: ImageBackupItem) {
         let panel = NSSavePanel()
         panel.title = "Tallenna varmuuskopio Macille"
-        panel.nameFieldStringValue = item.fileName
+        panel.nameFieldStringValue = item.isFolder ? "\(item.fileName).zip" : item.fileName
         panel.allowedContentTypes = [UTType.zip]
         
         if panel.runModal() == .OK, let targetURL = panel.url, let box = state.activeBox {
@@ -824,7 +824,8 @@ struct ImageManagerView: View {
                 let (ok, err) = await EnigmaBoxService.shared.downloadImageBackup(
                     box: box,
                     remotePath: item.remotePath,
-                    localDestination: targetURL
+                    localDestination: targetURL,
+                    isFolder: item.isFolder
                 ) { prog in
                     Task { @MainActor in
                         self.downloadProgress = prog
