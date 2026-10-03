@@ -37,6 +37,7 @@ struct ImageManagerView: View {
     @State private var multibootSlots: [MultibootSlotInfo] = []
     @State private var currentSlot: Int?
     @State private var existingBackups: [ImageBackupItem] = []
+    @State private var flashMethod: EnigmaBoxService.FlashMethod?
     @State private var isLoadingInfo: Bool = false
     
     // Varmuuskopionti
@@ -535,6 +536,22 @@ struct ImageManagerView: View {
                 // 3. Asetukset
                 Toggle(l10n.t("Image_RebootAfter"), isOn: $rebootAfterFlash)
                     .font(.subheadline)
+
+                if let method = flashMethod {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: {
+                            if case .unavailable = method { return "exclamationmark.triangle" }
+                            return "info.circle"
+                        }())
+                        Text(method.description)
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundColor({
+                        if case .unavailable = method { return Color.orange }
+                        return Color.secondary
+                    }())
+                }
                 
                 // 4. Asennuspainike & Edistyminen
                 if isFlashing {
@@ -689,6 +706,11 @@ struct ImageManagerView: View {
         isLoadingInfo = true
         defer { isLoadingInfo = false }
         
+        // 0. Aiemman USB-päivityksen asennustiedostot pois, ettei asennus käynnisty uudelleen
+        if await EnigmaBoxService.shared.cleanupUSBFlashStaging(box: box) > 0 {
+            state.showToast("Edellisen USB-asennuksen tiedostot poistettiin USB-muistilta.")
+        }
+
         // 1. Tallennuslaitteet
         let devs = await EnigmaBoxService.shared.fetchBoxStorageDevices(box: box)
         self.storageDevices = devs
@@ -706,7 +728,10 @@ struct ImageManagerView: View {
             self.selectedTargetSlot = first.slot
         }
         
-        // 3. Varmuuskopiot
+        // 3. Asennustapa (ofgwrite tai Vu+:n USB-päivitys)
+        self.flashMethod = await EnigmaBoxService.shared.detectFlashMethod(box: box)
+
+        // 4. Varmuuskopiot
         let backups = await EnigmaBoxService.shared.fetchBoxImageBackups(box: box, storageDevices: devs)
         self.existingBackups = backups
         if self.selectedBoxBackupForFlash == nil {

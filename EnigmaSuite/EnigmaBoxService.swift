@@ -2239,16 +2239,15 @@ rm -f /tmp/enigmasuite_backup.status /tmp/enigmasuite_backup.log
         rebootAfter: Bool,
         onProgress: @escaping (String, Double) -> Void
     ) async -> (success: Bool, message: String) {
-        // Flash kirjoittaa imagen ofgwritella; tarkistetaan ennen kuin siirretään satoja megatavuja turhaan
-        let (_, toolCheck) = await executeTelnetCommand(
-            ip: box.ip,
-            command: "[ -x /usr/bin/ofgwrite ] && echo OFGWRITE_OK || echo OFGWRITE_MISSING",
-            timeout: 6.0,
-            username: box.username,
-            password: box.password
-        )
-        if !toolCheck.components(separatedBy: .newlines).contains(where: { $0.trimmingCharacters(in: .whitespaces) == "OFGWRITE_OK" }) {
-            return (false, "Boksista puuttuu ofgwrite-ohjelma, jota imagen asennus tarvitsee. Asenna se boksin pakettienhallinnasta (opkg install ofgwrite) tai asenna image boksin omalla flash-toiminnolla.")
+        // Asennustapa tarkistetaan ennen kuin siirretään satoja megatavuja turhaan
+        switch await detectFlashMethod(box: box) {
+        case .ofgwrite:
+            break
+        case .usbUpdate(let usbMount, let model):
+            return await flashViaUSBUpdate(box: box, zipSource: zipSource, usbMount: usbMount, model: model,
+                                           rebootAfter: rebootAfter, onProgress: onProgress)
+        case .unavailable(let reason):
+            return (false, reason)
         }
 
         let workDir = "\(storage.mountPoint)/imagebackups/flash_tmp"
@@ -2410,5 +2409,230 @@ rm -f /tmp/enigmasuite_flash.status /tmp/enigmasuite_flash.log
         
         return (false, "Aikakatkaisu: asennus kesti yli 5 minuuttia.")
     }
+
+    // MARK: - Asennustapa ja Vu+:n USB-päivitys
+
+    enum FlashMethod: Equatable {
+        /// Image kirjoitetaan suoraan muistiin ofgwritella
+        case ofgwrite
+        /// Vu+: image valmistellaan FAT32-USB-muistille, ja käynnistyslatain asentaa sen uudelleenkäynnistyksessä
+        case usbUpdate(mount: String, model: String)
+        case unavailable(String)
+
+        var description: String {
+            switch self {
+            case .ofgwrite:
+                return "Asennustapa: ofgwrite (image kirjoitetaan suoraan boksin muistiin)."
+            case .usbUpdate(let mount, _):
+                return "Asennustapa: Vu+:n USB-päivitys USB-muistin \(mount) kautta. Boksi käynnistyy uudelleen ja asentaa imagen itse; EnigmaSuite poistaa asennustiedostot USB-muistilta, kun boksi on taas verkossa."
+            case .unavailable(let reason):
+                return reason
+            }
+        }
+    }
+
+    func detectFlashMethod(box: EnigmaBox) async -> FlashMethod {
+        let cmd = """
+        [ -x /usr/bin/ofgwrite ] && echo OFG; \
+        echo "MODEL|$(cat /proc/stb/info/vumodel 2>/dev/null | tr -d '\\r\\n')"; \
+        ls /boot/STARTUP_* >/dev/null 2>&1 && echo MULTIBOOT; \
+        grep ' /media/' /proc/mounts | while read DEV MNT TYPE REST; do \
+        B=$(basename "$DEV" | sed 's/[0-9]*$//'); \
+        case "$(readlink -f /sys/block/$B 2>/dev/null)" in *usb*) echo "USB|$TYPE|$MNT";; esac; done
+        """
+        let (ok, output) = await executeTelnetCommand(ip: box.ip, command: cmd, timeout: 8.0, username: box.username, password: box.password)
+        guard ok else { return .unavailable("Boksiin ei saatu yhteyttä asennustavan tarkistamiseksi.") }
+
+        let lines = output.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+        if lines.contains("OFG") { return .ofgwrite }
+
+        let model = lines.first(where: { $0.hasPrefix("MODEL|") }).map { String($0.dropFirst(6)) } ?? ""
+        let noOfgwrite = "Boksista puuttuu ofgwrite-ohjelma, jota imagen asennus tarvitsee. Asenna se boksin pakettienhallinnasta (opkg install ofgwrite) tai asenna image boksin omalla flash-toiminnolla."
+        // USB-päivitys vain Vu+-bokseille ilman multibootia (multiboot-slotteja käynnistyslatain ei tunne)
+        guard !model.isEmpty, !lines.contains("MULTIBOOT") else { return .unavailable(noOfgwrite) }
+
+        let usbs = lines.filter { $0.hasPrefix("USB|") }
+            .map { $0.split(separator: "|", maxSplits: 2).map(String.init) }
+            .filter { $0.count == 3 }
+        if let fat = usbs.first(where: { ["vfat", "msdos"].contains($0[1]) }) {
+            return .usbUpdate(mount: fat[2], model: model)
+        }
+        if let other = usbs.first {
+            return .unavailable("Boksista puuttuu ofgwrite, joten image asennetaan Vu+:n USB-päivityksellä. Se vaatii FAT32-muotoillun USB-muistin, mutta \(other[2]) on muotoa \(other[1]). Liitä boksiin FAT32-muotoiltu USB-muisti (vähintään 1 Gt) ja yritä uudelleen.")
+        }
+        return .unavailable("Boksista puuttuu ofgwrite, joten image asennetaan Vu+:n USB-päivityksellä. Liitä boksiin FAT32-muotoiltu USB-muisti (vähintään 1 Gt) ja yritä uudelleen.")
+    }
+
+    /// Siirtää paikallisen tiedoston boksille FTP:llä
+    private func uploadFileToBox(box: EnigmaBox, localURL: URL, remotePath: String) async -> (success: Bool, error: String?) {
+        await ensureFTPAllowed(box: box)
+        let cred = await ftpCredentials(ip: box.ip, username: box.username, password: box.password)
+        let cleanPath = remotePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+        proc.arguments = ["-sS", "--connect-timeout", "10", "-T", localURL.path, "ftp://\(cred)@\(box.ip)//\(cleanPath)"]
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+        } catch {
+            return (false, "Imagen siirto epäonnistui: \(error.localizedDescription)")
+        }
+        return proc.terminationStatus == 0
+            ? (true, nil)
+            : (false, "Imagen siirto boksille epäonnistui (FTP-koodi \(proc.terminationStatus))")
+    }
+
+    /// Käynnistystunniste vaihtuu jokaisella käynnistyskerralla
+    private func currentBootID(box: EnigmaBox) async -> String? {
+        let (ok, output) = await executeTelnetCommand(ip: box.ip, command: "cat /proc/sys/kernel/random/boot_id", timeout: 6.0, username: box.username, password: box.password)
+        let id = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ok && id.count >= 32 && !id.contains(" ") ? id : nil
+    }
+
+    /// Asentaa imagen Vu+:n käynnistyslataimen USB-päivityksellä: image puretaan USB-muistille
+    /// kansioon vuplus/<malli>/ ja merkitään reboot.update-tiedostolla. `targetRoot` on testausta varten.
+    func flashViaUSBUpdate(
+        box: EnigmaBox,
+        zipSource: FlashZipSource,
+        usbMount: String,
+        model: String,
+        rebootAfter: Bool,
+        targetRoot: String? = nil,
+        onProgress: @escaping (String, Double) -> Void
+    ) async -> (success: Bool, message: String) {
+        guard let bootID = await currentBootID(box: box) else {
+            return (false, "Boksin käynnistystunnistetta ei saatu luettua.")
+        }
+
+        let sourcePath: String
+        var removeSource = false
+        switch zipSource {
+        case .boxBackup(let path, _):
+            sourcePath = path
+        case .localFile(let url):
+            onProgress("Siirretään image-tiedostoa USB-muistille (FTP)...", 0.1)
+            sourcePath = "\(usbMount)/.enigmasuite_usbflash_upload.zip"
+            let (ok, err) = await uploadFileToBox(box: box, localURL: url, remotePath: sourcePath)
+            guard ok else { return (false, err ?? "Imagen siirto epäonnistui.") }
+            removeSource = true
+            onProgress("Image siirretty boksille.", 0.4)
+        }
+
+        let script = """
+        cat << 'EOF' > /tmp/enigmasuite_usbflash.sh
+#!/bin/sh
+SRC="$1"; USB="$2"; MODEL="$3"; REBOOT_AFTER="$4"; BOOT_ID="$5"; REMOVE_SRC="$6"; ROOT="$7"
+STATUS_FILE="/tmp/enigmasuite_flash.status"
+LOG_FILE="/tmp/enigmasuite_flash.log"
+TMP="$USB/.enigmasuite_usbflash_tmp"
+fail() { echo "STATUS:ERROR:0.0:$1" > "$STATUS_FILE"; rm -rf "$TMP"; [ "$REMOVE_SRC" = "1" ] && rm -f "$SRC"; exit 1; }
+
+rm -rf "$TMP"
+mkdir -p "$TMP" || fail "USB-muistille ei voi kirjoittaa."
+if [ -d "$SRC" ]; then
+    echo "STATUS:COPY:0.45:Kopioidaan image USB-muistille..." > "$STATUS_FILE"
+    cp -r "$SRC"/. "$TMP"/ >> "$LOG_FILE" 2>&1 || fail "Kopiointi USB-muistille epäonnistui (onko tilaa riittävästi?)."
+else
+    echo "STATUS:UNPACK:0.45:Puretaan image USB-muistille..." > "$STATUS_FILE"
+    unzip -o "$SRC" -d "$TMP" >> "$LOG_FILE" 2>&1 || fail "Image-tiedoston purkaminen epäonnistui (onko USB-muistilla tilaa?)."
+fi
+[ "$REMOVE_SRC" = "1" ] && rm -f "$SRC"
+
+echo "STATUS:CHECK:0.75:Tarkistetaan imagen sisältö..." > "$STATUS_FILE"
+IMG_DIR=""
+for D in $(find "$TMP" -type d -name "$MODEL"); do
+    [ "$(basename "$(dirname "$D")")" = "vuplus" ] && IMG_DIR="$D" && break
+done
+[ -n "$IMG_DIR" ] || fail "Imagesta ei löytynyt kansiota vuplus/$MODEL. Image ei ole tälle boksille ($MODEL)."
+ls "$IMG_DIR"/kernel*_auto.bin >/dev/null 2>&1 || fail "Imagesta puuttuu kernel (kernel_auto.bin)."
+{ ls "$IMG_DIR"/rootfs.* || ls "$IMG_DIR"/root_cfe_auto.*; } >/dev/null 2>&1 || fail "Imagesta puuttuu tiedostojärjestelmä (rootfs)."
+# Vu+ 4K tarvitsee initrd:n; jos imagesta puuttuu, käytetään boksin nykyistä (sama kuin osio ennallaan)
+if [ ! -f "$IMG_DIR/initrd_auto.bin" ] && [ -e /dev/disk/by-partlabel/initrd ]; then
+    dd if=/dev/disk/by-partlabel/initrd of="$IMG_DIR/initrd_auto.bin" bs=1M >> "$LOG_FILE" 2>&1 || fail "Boksin initrd-osion kopiointi epäonnistui."
+fi
+
+TARGET="$ROOT/vuplus/$MODEL"
+if [ -e "$TARGET" ]; then
+    mv "$TARGET" "$ROOT/enigmasuite_vanha_vuplus_${MODEL}_$(date +%Y%m%d_%H%M%S)" || fail "USB-muistilla olevaa vanhaa vuplus/$MODEL-kansiota ei voitu siirtää sivuun."
+fi
+mkdir -p "$ROOT/vuplus"
+mv "$IMG_DIR" "$TARGET" || fail "Imagen siirto paikalleen epäonnistui."
+rm -rf "$TMP"
+touch "$TARGET/reboot.update"
+echo "$BOOT_ID" > "$TARGET/.enigmasuite_usbflash"
+sync
+
+if [ "$REBOOT_AFTER" = "true" ]; then
+    echo "STATUS:DONE:0.8:Image valmiina USB-muistilla. Boksi käynnistyy uudelleen ja asentaa imagen..." > "$STATUS_FILE"
+    sync
+    sleep 3
+    reboot
+else
+    echo "STATUS:DONE:1.0:Image valmiina USB-muistilla." > "$STATUS_FILE"
+fi
+EOF
+chmod +x /tmp/enigmasuite_usbflash.sh
+rm -f /tmp/enigmasuite_flash.status /tmp/enigmasuite_flash.log
+"""
+        let (scriptOk, _) = await executeTelnetCommand(ip: box.ip, command: script, timeout: 6.0, username: box.username, password: box.password)
+        guard scriptOk else { return (false, "Asennusskriptin luonti boksille epäonnistui.") }
+
+        let root = targetRoot ?? usbMount
+        let start = "nohup /bin/sh /tmp/enigmasuite_usbflash.sh '\(sourcePath)' '\(usbMount)' '\(model)' '\(rebootAfter ? "true" : "false")' '\(bootID)' '\(removeSource ? "1" : "0")' '\(root)' > /tmp/enigmasuite_flash.log 2>&1 &"
+        _ = await executeTelnetCommand(ip: box.ip, command: start, timeout: 4.0, username: box.username, password: box.password)
+
+        // Odotetaan valmistelua (purku USB-muistille voi kestää useita minuutteja)
+        var prepared = false
+        let started = Date()
+        while Date().timeIntervalSince(started) < 900 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            let (reachable, status) = await executeTelnetCommand(ip: box.ip, command: "cat /tmp/enigmasuite_flash.status 2>/dev/null", timeout: 5.0, username: box.username, password: box.password)
+            if !reachable && rebootAfter {
+                // Boksi lähti jo uudelleenkäynnistykseen ennen kuin ehdimme lukea valmis-tilan
+                if await currentBootID(box: box) == nil { prepared = true; break }
+                continue
+            }
+            guard let line = status.components(separatedBy: .newlines).first(where: { $0.hasPrefix("STATUS:") }) else { continue }
+            let parts = line.components(separatedBy: ":")
+            guard parts.count >= 4 else { continue }
+            let msg = parts[3...].joined(separator: ":")
+            onProgress(msg, Double(parts[2]) ?? 0.5)
+            if parts[1] == "ERROR" { return (false, msg) }
+            if parts[1] == "DONE" { prepared = true; break }
+        }
+        guard prepared else { return (false, "Aikakatkaisu: imagen valmistelu USB-muistille kesti yli 15 minuuttia.") }
+
+        let removeHint = "Irrota USB-muisti asennuksen jälkeen, ettei asennus käynnisty uudelleen seuraavalla käynnistyskerralla (EnigmaSuite poistaa asennustiedostot myös automaattisesti, kun yhdistät boksiin)."
+        guard rebootAfter else {
+            return (true, "Image on valmiina USB-muistilla \(usbMount). Käynnistä boksi uudelleen, niin asennus alkaa. \(removeHint)")
+        }
+
+        // Boksi asentaa imagen ja käynnistyy uudelleen; odotetaan että se palaa verkkoon uudella käynnistystunnisteella
+        let waitStart = Date()
+        while Date().timeIntervalSince(waitStart) < 1200 {
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            let elapsed = Date().timeIntervalSince(waitStart)
+            onProgress("Boksi asentaa imagea – älä katkaise virtaa (\(Int(elapsed / 60)) min)...", min(0.8 + elapsed / 1200 * 0.15, 0.95))
+            guard let newID = await currentBootID(box: box), newID != bootID else { continue }
+            onProgress("Boksi käynnistyi. Poistetaan asennustiedostot USB-muistilta...", 0.97)
+            await cleanupUSBFlashStaging(box: box)
+            return (true, "Image asennettu ja asennustiedostot poistettu USB-muistilta.")
+        }
+        return (false, "Boksi ei palannut verkkoon 20 minuutissa. Odota, että asennus valmistuu. \(removeHint)")
+    }
+
+    /// Poistaa aiemman USB-päivityksen asennuskansion, jos boksi on käynnistynyt sen jälkeen uudelleen
+    /// (asennus on jo tehty). Palauttaa poistettujen kansioiden määrän.
+    @discardableResult
+    func cleanupUSBFlashStaging(box: EnigmaBox) async -> Int {
+        let cmd = """
+        CUR=$(cat /proc/sys/kernel/random/boot_id); \
+        for MK in /media/*/vuplus/*/.enigmasuite_usbflash; do [ -f "$MK" ] || continue; \
+        if [ "$(cat "$MK")" != "$CUR" ]; then rm -rf "$(dirname "$MK")" && echo "CLEANED|$MK"; else echo "PENDING|$MK"; fi; done
+        """
+        let (_, output) = await executeTelnetCommand(ip: box.ip, command: cmd, timeout: 10.0, username: box.username, password: box.password)
+        return output.components(separatedBy: .newlines).filter { $0.hasPrefix("CLEANED|") }.count
+    }
+
 }
 
