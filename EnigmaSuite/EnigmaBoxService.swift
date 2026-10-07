@@ -1930,9 +1930,8 @@ final class EnigmaBoxService {
             try proc.run()
             
             // Seurataan tiedostokoon kasvua taustalla
-            var isRunning = true
             let monitorTask = Task {
-                while isRunning {
+                while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     if let attrs = try? FileManager.default.attributesOfItem(atPath: localDestination.path),
                        let currentSize = attrs[.size] as? Int64 {
@@ -1943,7 +1942,6 @@ final class EnigmaBoxService {
             }
             
             proc.waitUntilExit()
-            isRunning = false
             monitorTask.cancel()
             
             if proc.terminationStatus == 0 {
@@ -2099,11 +2097,46 @@ elif [ -z "$KERNEL_DEV" ] && [ -e "/dev/kernel" ]; then
     KERNEL_DEV="/dev/kernel"
 elif [ -z "$KERNEL_DEV" ] && [ -e "/dev/disk/by-partlabel/kernel" ]; then
     KERNEL_DEV="/dev/disk/by-partlabel/kernel"
+elif [ -z "$KERNEL_DEV" ]; then
+    case "$MODEL" in
+        zero4k)
+            [ -e "/dev/mmcblk0p4" ] && KERNEL_DEV="/dev/mmcblk0p4"
+            ;;
+        duo4k|duo4kse)
+            [ -e "/dev/mmcblk0p6" ] && KERNEL_DEV="/dev/mmcblk0p6"
+            ;;
+        solo4k|uno4k|uno4kse|ultimo4k)
+            [ -e "/dev/mmcblk0p1" ] && KERNEL_DEV="/dev/mmcblk0p1"
+            ;;
+    esac
 fi
 
 # Vu+ 4K -mallien initrd- ja splash-osiot (kuten boksin oma image-varmuuskopio)
-[ -e "/dev/disk/by-partlabel/initrd" ] && dd if="/dev/disk/by-partlabel/initrd" of="${IMAGE_DIR}/initrd_auto.bin" bs=1M 2>> "$LOG_FILE"
-[ -e "/dev/disk/by-partlabel/splash" ] && dd if="/dev/disk/by-partlabel/splash" of="${IMAGE_DIR}/splash_auto.bin" bs=1M 2>> "$LOG_FILE"
+if [ -e "/dev/disk/by-partlabel/initrd" ]; then
+    dd if="/dev/disk/by-partlabel/initrd" of="${IMAGE_DIR}/initrd_auto.bin" bs=1M 2>> "$LOG_FILE"
+elif [ "$BRAND" = "vuplus" ]; then
+    case "$MODEL" in
+        zero4k)
+            [ -e "/dev/mmcblk0p5" ] && dd if="/dev/mmcblk0p5" of="${IMAGE_DIR}/initrd_auto.bin" bs=1M 2>> "$LOG_FILE"
+            ;;
+        duo4k|duo4kse)
+            [ -e "/dev/mmcblk0p7" ] && dd if="/dev/mmcblk0p7" of="${IMAGE_DIR}/initrd_auto.bin" bs=1M 2>> "$LOG_FILE"
+            ;;
+    esac
+fi
+
+if [ -e "/dev/disk/by-partlabel/splash" ]; then
+    dd if="/dev/disk/by-partlabel/splash" of="${IMAGE_DIR}/splash_auto.bin" bs=1M 2>> "$LOG_FILE"
+elif [ "$BRAND" = "vuplus" ]; then
+    case "$MODEL" in
+        zero4k)
+            [ -e "/dev/mmcblk0p6" ] && dd if="/dev/mmcblk0p6" of="${IMAGE_DIR}/splash_auto.bin" bs=1M 2>> "$LOG_FILE"
+            ;;
+        duo4k|duo4kse)
+            [ -e "/dev/mmcblk0p8" ] && dd if="/dev/mmcblk0p8" of="${IMAGE_DIR}/splash_auto.bin" bs=1M 2>> "$LOG_FILE"
+            ;;
+    esac
+fi
 
 if [ -n "$KERNEL_DEV" ]; then
     dd if="$KERNEL_DEV" of="${IMAGE_DIR}/kernel_auto.bin" bs=1M 2>> "$LOG_FILE"
@@ -2250,6 +2283,16 @@ rm -f /tmp/enigmasuite_backup.status /tmp/enigmasuite_backup.log
             return (false, reason)
         }
 
+        // Varmistetaan että ofgwrite löytyy boksista (tai siirretään automaattisesti EnigmaSuitesta)
+        onProgress("Tarkistetaan flashaus-työkalu...", 0.03)
+        let ofgStatus = await ensureOfgwriteInstalled(box: box) { msg in
+            onProgress(msg, 0.06)
+        }
+        guard ofgStatus.success else {
+            return (false, ofgStatus.error ?? "ofgwrite-työkalua ei saatu valmisteltua boksille.")
+        }
+        let ofgBin = ofgStatus.binaryPath
+
         let workDir = "\(storage.mountPoint)/imagebackups/flash_tmp"
         _ = await executeTelnetCommand(ip: box.ip, command: "mkdir -p '\(workDir)'", timeout: 4.0, username: box.username, password: box.password)
         
@@ -2298,6 +2341,18 @@ REBOOT_AFTER="$4"
 LOG_FILE="/tmp/enigmasuite_flash.log"
 STATUS_FILE="/tmp/enigmasuite_flash.status"
 
+OFG_BIN="\(ofgBin)"
+if [ ! -x "$OFG_BIN" ]; then
+    if [ -x /usr/bin/ofgwrite ]; then
+        OFG_BIN="/usr/bin/ofgwrite"
+    elif [ -x /tmp/ofgwrite ]; then
+        OFG_BIN="/tmp/ofgwrite"
+    else
+        echo "STATUS:ERROR:0.0:ofgwrite-ohjelmaa ei löytynyt boksista." > "$STATUS_FILE"
+        exit 1
+    fi
+fi
+
 rm -rf "${WORK_DIR}/extracted"
 if [ -d "$ZIP_PATH" ]; then
     # Purettuna tallennettu varmuuskopio: käytetään kansiota sellaisenaan
@@ -2323,9 +2378,9 @@ fi
 echo "STATUS:FLASH:0.65:Kirjoitetaan image muistiin (ofgwrite)..." > "$STATUS_FILE"
 
 if [ "$TARGET_SLOT" != "0" ] && [ -n "$TARGET_SLOT" ]; then
-    /usr/bin/ofgwrite -r -k -m"${TARGET_SLOT}" "$IMAGE_DIR" >> "$LOG_FILE" 2>&1
+    "$OFG_BIN" -r -k -m"${TARGET_SLOT}" "$IMAGE_DIR" >> "$LOG_FILE" 2>&1
 else
-    /usr/bin/ofgwrite -r -k "$IMAGE_DIR" >> "$LOG_FILE" 2>&1
+    "$OFG_BIN" -r -k "$IMAGE_DIR" >> "$LOG_FILE" 2>&1
 fi
 
 RETVAL=$?
@@ -2422,18 +2477,122 @@ rm -f /tmp/enigmasuite_flash.status /tmp/enigmasuite_flash.log
         var description: String {
             switch self {
             case .ofgwrite:
-                return "Asennustapa: ofgwrite (image kirjoitetaan suoraan boksin muistiin)."
+                return LocalizationManager.shared.isFinnish
+                    ? "Asennustapa: ofgwrite (image kirjoitetaan suoraan boksin muistiin tai multiboot-slottiin)."
+                    : "Installation method: ofgwrite (image is flashed directly to box storage or multiboot slot)."
             case .usbUpdate(let mount, _):
-                return "Asennustapa: Vu+:n USB-päivitys USB-muistin \(mount) kautta. Boksi käynnistyy uudelleen ja asentaa imagen itse; EnigmaSuite poistaa asennustiedostot USB-muistilta, kun boksi on taas verkossa."
+                return LocalizationManager.shared.isFinnish
+                    ? "Asennustapa: Vu+:n USB-päivitys USB-muistin \(mount) kautta. Boksi käynnistyy uudelleen ja asentaa imagen itse; EnigmaSuite poistaa asennustiedostot USB-muistilta, kun boksi on taas verkossa."
+                    : "Installation method: Vu+ USB update via USB drive \(mount). The box will reboot and flash the image itself; EnigmaSuite will clean up installation files once the box is online."
             case .unavailable(let reason):
                 return reason
             }
         }
     }
 
+    /// Etsii sovelluspaketista tai kehitysympäristöstä mukaan liitetyn työkalutiedoston (binääri tai skripti)
+    private func findBundledTool(named name: String) -> URL? {
+        // 1. Resources-juuri
+        if let url = Bundle.main.url(forResource: name, withExtension: nil) {
+            return url
+        }
+        // 2. Resources/bin/
+        if let url = Bundle.main.url(forResource: name, withExtension: nil, subdirectory: "bin") {
+            return url
+        }
+        // 3. resourceURL suoraan
+        if let resURL = Bundle.main.resourceURL?.appendingPathComponent(name), FileManager.default.fileExists(atPath: resURL.path) {
+            return resURL
+        }
+        if let resBinURL = Bundle.main.resourceURL?.appendingPathComponent("bin/\(name)"), FileManager.default.fileExists(atPath: resBinURL.path) {
+            return resBinURL
+        }
+        // 4. Kehitysympäristö varalle
+        let devPath = "/Volumes/Dataa/Ohjelmointi/ProjektitSwift/EnigmaSuite/EnigmaSuite/Resources/bin/\(name)"
+        if FileManager.default.fileExists(atPath: devPath) {
+            return URL(fileURLWithPath: devPath)
+        }
+        return nil
+    }
+
+    /// Varmistaa että boksista löytyy toimiva ofgwrite-työkalu.
+    /// Jos sitä ei ole boksissa valmiina, EnigmaSuite siirtää laitteen prosessoriarkkitehtuurille sopivan
+    /// staattisesti linkitetyn ofgwrite-binäärin boksille (/tmp/ofgwrite).
+    func ensureOfgwriteInstalled(box: EnigmaBox, onProgress: ((String) -> Void)? = nil) async -> (success: Bool, binaryPath: String, error: String?) {
+        // 1. Tarkistetaan onko ofgwrite jo boksissa /usr/bin tai /tmp
+        let (checkOk, checkOut) = await executeTelnetCommand(
+            ip: box.ip,
+            command: "[ -x /usr/bin/ofgwrite ] && echo USR_OK; [ -x /tmp/ofgwrite ] && echo TMP_OK",
+            timeout: 4.0,
+            username: box.username,
+            password: box.password
+        )
+        if checkOk {
+            if checkOut.contains("USR_OK") {
+                return (true, "/usr/bin/ofgwrite", nil)
+            }
+            if checkOut.contains("TMP_OK") {
+                return (true, "/tmp/ofgwrite", nil)
+            }
+        }
+
+        // 2. Selvitetään boksin arkkitehtuuri
+        let (archOk, archOut) = await executeTelnetCommand(
+            ip: box.ip,
+            command: "uname -m",
+            timeout: 4.0,
+            username: box.username,
+            password: box.password
+        )
+        guard archOk else {
+            return (false, "", "Boksin prosessoriarkkitehtuurin selvittäminen epäonnistui.")
+        }
+        let arch = archOut.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        let toolName: String
+        if arch.contains("aarch64") || arch.contains("arm64") {
+            toolName = "ofgwrite_aarch64"
+        } else if arch.contains("arm") {
+            toolName = "ofgwrite_arm"
+        } else if arch.contains("mips") {
+            toolName = "ofgwrite_mips"
+        } else {
+            return (false, "", "Boksin arkkitehtuurille (\(arch)) ei löytynyt yhteensopivaa ofgwrite-työkalua.")
+        }
+
+        // 3. Etsitään EnigmaSuiten mukana tuleva binääri
+        guard let localToolURL = findBundledTool(named: toolName) else {
+            return (false, "", "EnigmaSuite-sovelluksesta puuttuu \(toolName) -tiedosto.")
+        }
+
+        onProgress?("Siirretään ofgwrite-työkalu boksille (\(toolName))...")
+
+        // 4. Siirretään boksille FTP:llä
+        await ensureFTPAllowed(box: box)
+        let (uploadOk, uploadErr) = await uploadFileToBox(box: box, localURL: localToolURL, remotePath: "/tmp/ofgwrite")
+        guard uploadOk else {
+            return (false, "", "ofgwrite-työkalun siirto boksille epäonnistui: \(uploadErr ?? "tuntematon virhe")")
+        }
+
+        // 5. Asetetaan suoritusoikeudet
+        let (chmodOk, chmodOut) = await executeTelnetCommand(
+            ip: box.ip,
+            command: "chmod 755 /tmp/ofgwrite && [ -x /tmp/ofgwrite ] && echo CHMOD_OK",
+            timeout: 5.0,
+            username: box.username,
+            password: box.password
+        )
+        guard chmodOk, chmodOut.contains("CHMOD_OK") else {
+            return (false, "", "ofgwrite-työkalun suoritusoikeuksien asettaminen boksilla epäonnistui.")
+        }
+
+        return (true, "/tmp/ofgwrite", nil)
+    }
+
     func detectFlashMethod(box: EnigmaBox) async -> FlashMethod {
         let cmd = """
-        [ -x /usr/bin/ofgwrite ] && echo OFG; \
+        [ -x /usr/bin/ofgwrite ] || [ -x /tmp/ofgwrite ] && echo OFG; \
+        echo "ARCH|$(uname -m 2>/dev/null)"; \
         echo "MODEL|$(cat /proc/stb/info/vumodel 2>/dev/null | tr -d '\\r\\n')"; \
         ls /boot/STARTUP_* >/dev/null 2>&1 && echo MULTIBOOT; \
         grep ' /media/' /proc/mounts | while read DEV MNT TYPE REST; do \
@@ -2445,6 +2604,13 @@ rm -f /tmp/enigmasuite_flash.status /tmp/enigmasuite_flash.log
 
         let lines = output.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
         if lines.contains("OFG") { return .ofgwrite }
+
+        let arch = lines.first(where: { $0.hasPrefix("ARCH|") }).map { String($0.dropFirst(5)).lowercased() } ?? ""
+        let isKnownArch = arch.contains("arm") || arch.contains("mips") || arch.contains("aarch64")
+        if isKnownArch {
+            // EnigmaSuite toimittaa ofgwrite-työkalun boksille automaattisesti
+            return .ofgwrite
+        }
 
         let model = lines.first(where: { $0.hasPrefix("MODEL|") }).map { String($0.dropFirst(6)) } ?? ""
         let noOfgwrite = "Boksista puuttuu ofgwrite-ohjelma, jota imagen asennus tarvitsee. Asenna se boksin pakettienhallinnasta (opkg install ofgwrite) tai asenna image boksin omalla flash-toiminnolla."

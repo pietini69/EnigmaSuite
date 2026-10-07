@@ -111,7 +111,7 @@ final class EnigmaSuiteState: NSObject, ObservableObject {
     func autoDiscoverBoxes(showFeedback: Bool = true) async {
         isDiscovering = true
         if showFeedback {
-            showToast("Etsitään Enigma2-laitteita lähiverkosta")
+            showToast(L10n("Toast_SearchingBoxes"))
         }
         
         let found = await EnigmaBoxService.shared.discoverNetworkBoxes()
@@ -183,9 +183,9 @@ final class EnigmaSuiteState: NSObject, ObservableObject {
         
         if showFeedback {
             if found.isEmpty {
-                showToast("Lähiverkosta ei löytynyt Enigma2-laitteita.", isError: true)
+                showToast(L10n("Toast_NoBoxesFound"), isError: true)
             } else {
-                showToast("Verkkohaku valmis: Löytyi \(found.count) Enigma2-laitetta!")
+                showToast(L10n("Toast_BoxesFound", found.count))
             }
         }
     }
@@ -205,7 +205,7 @@ final class EnigmaSuiteState: NSObject, ObservableObject {
         boxes.append(newBox)
         activeBox = newBox
         saveBoxes()
-        showToast("Boksi lisätty: \(newBox.name)")
+        showToast(L10n("Toast_BoxAdded", newBox.name))
         
         Task {
             await refreshBoxDetails(newBox)
@@ -219,7 +219,7 @@ final class EnigmaSuiteState: NSObject, ObservableObject {
                 activeBox = updatedBox
             }
             saveBoxes()
-            showToast("Boksin tiedot päivitetty")
+            showToast(L10n("Toast_BoxUpdated"))
         }
     }
     
@@ -229,7 +229,7 @@ final class EnigmaSuiteState: NSObject, ObservableObject {
             activeBox = boxes.first
         }
         saveBoxes()
-        showToast("Boksi poistettu: \(box.name)")
+        showToast(L10n("Toast_BoxDeleted", box.name))
     }
     
     // MARK: - Yhteyden ja laitetietojen päivitys
@@ -254,7 +254,7 @@ final class EnigmaSuiteState: NSObject, ObservableObject {
     // MARK: - VLC & Striimaus
     func openInVLC(sRef: String) {
         guard let box = activeBox, let url = box.streamURL(for: sRef) else {
-            showToast("Ei aktiivista boksia striimaukseen", isError: true)
+            showToast(L10n("Toast_NoBoxForStreaming"), isError: true)
             return
         }
         
@@ -271,7 +271,7 @@ final class EnigmaSuiteState: NSObject, ObservableObject {
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
                 p.arguments = ["-a", path, url.absoluteString]
                 if (try? p.run()) != nil {
-                    showToast("Avataan toistimeen: \(url.absoluteString)")
+                    showToast(L10n("Toast_OpeningPlayer", url.absoluteString))
                     return
                 }
             }
@@ -279,7 +279,7 @@ final class EnigmaSuiteState: NSObject, ObservableObject {
         
         // Varavaihtoehto: avaa järjestelmän oletusohjelmalla
         NSWorkspace.shared.open(url)
-        showToast("Avattu striimi: \(url.absoluteString)")
+        showToast(L10n("Toast_StreamOpened", url.absoluteString))
     }
     
     // MARK: - Heartbeat

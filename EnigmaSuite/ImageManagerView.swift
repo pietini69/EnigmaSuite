@@ -124,10 +124,10 @@ struct ImageManagerView: View {
                     Task {
                         let ok = await EnigmaBoxService.shared.deleteBoxImageBackup(box: box, item: item)
                         if ok {
-                            state.showToast("Varmuuskopio poistettu boksista.")
+                            state.showToast(L10n("Toast_BackupDeleted"))
                             await loadBoxData()
                         } else {
-                            state.showToast("Poisto epäonnistui.", isError: true)
+                            state.showToast(L10n("Toast_DeleteFailed"), isError: true)
                         }
                     }
                 }
@@ -147,14 +147,14 @@ struct ImageManagerView: View {
         }
         .alert(l10n.t("Image_ConfirmBootTitle"), isPresented: $showBootSlotAlert) {
             Button(l10n.t("Common_Cancel"), role: .cancel) {}
-            Button("Käynnistä", role: .destructive) {
+            Button(L10n("Image_BtnBoot"), role: .destructive) {
                 if let slot = slotToBoot, let box = state.activeBox {
                     Task {
                         let (ok, msg) = await EnigmaBoxService.shared.switchBootSlot(box: box, targetSlot: slot.slot)
                         if ok {
-                            state.showToast("Boksi käynnistetään slotiin \(slot.slot)...")
+                            state.showToast(L10n("Toast_BootingToSlot", slot.slot))
                         } else {
-                            state.showToast("Käynnistys epäonnistui: \(msg)", isError: true)
+                            state.showToast(L10n("Toast_BootSlotFailed", msg), isError: true)
                         }
                     }
                 }
@@ -472,11 +472,11 @@ struct ImageManagerView: View {
                     
                     if flashSourceOption == .box {
                         if existingBackups.isEmpty {
-                            Text("Boksista ei löytynyt varmuuskopioita. Valitse paikallinen .zip Macilta.")
+                            Text(L10n("Image_NoBackupsPromptLocal"))
                                 .font(.caption)
                                 .foregroundColor(.orange)
                         } else {
-                            Picker("Valitse image:", selection: $selectedBoxBackupForFlash) {
+                            Picker(L10n("Image_SelectImagePicker"), selection: $selectedBoxBackupForFlash) {
                                 ForEach(existingBackups) { b in
                                     Text("\(b.fileName) (\(b.formattedSize))").tag(Optional(b))
                                 }
@@ -498,7 +498,7 @@ struct ImageManagerView: View {
                                         .font(.subheadline.bold())
                                 }
                             } else {
-                                Text("Ei valittua tiedostoa")
+                                Text(L10n("Image_NoFileSelected"))
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -513,7 +513,7 @@ struct ImageManagerView: View {
                     Text(l10n.t("Image_TargetSlot"))
                         .font(.subheadline.bold())
                     
-                    Picker("Kohdeslotti:", selection: $selectedTargetSlot) {
+                    Picker(L10n("Image_TargetSlotPicker"), selection: $selectedTargetSlot) {
                         ForEach(multibootSlots) { s in
                             Text(s.displayName).tag(s.slot)
                         }
@@ -657,7 +657,7 @@ struct ImageManagerView: View {
                     Text("Slot \(slot.slot)")
                         .font(.headline)
                     if slot.isCurrent {
-                        Text("AKTIIVINEN / KÄYNNISSÄ")
+                        Text(L10n("Image_SlotActiveRunning"))
                             .font(.caption2.bold())
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -672,7 +672,7 @@ struct ImageManagerView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 } else {
-                    Text("(Tyhjä osio)")
+                    Text(L10n("Image_SlotEmpty"))
                         .font(.caption)
                         .foregroundColor(.secondary.opacity(0.7))
                 }
@@ -708,7 +708,7 @@ struct ImageManagerView: View {
         
         // 0. Aiemman USB-päivityksen asennustiedostot pois, ettei asennus käynnisty uudelleen
         if await EnigmaBoxService.shared.cleanupUSBFlashStaging(box: box) > 0 {
-            state.showToast("Edellisen USB-asennuksen tiedostot poistettiin USB-muistilta.")
+            state.showToast(L10n("Toast_UsbCleaned"))
         }
 
         // 1. Tallennuslaitteet
@@ -743,7 +743,7 @@ struct ImageManagerView: View {
         guard let box = state.activeBox, let storage = selectedStorage else { return }
         isBackingUp = true
         backupProgress = 0.05
-        backupStatusText = "Valmistellaan..."
+        backupStatusText = L10n("Image_PreparingBackup")
         
         Task {
             let (success, message) = await EnigmaBoxService.shared.createFullImageBackup(
@@ -759,9 +759,9 @@ struct ImageManagerView: View {
             await MainActor.run {
                 self.isBackingUp = false
                 if success {
-                    state.showToast("Varmuuskopiointi valmis!")
+                    state.showToast(L10n("Toast_BackupComplete"))
                 } else {
-                    state.showToast("Virhe: \(message)", isError: true)
+                    state.showToast(L10n("Toast_Error", message), isError: true)
                 }
             }
             
@@ -775,7 +775,7 @@ struct ImageManagerView: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [UTType.zip]
-        panel.title = "Valitse asennettava Enigma2 Image (.zip)"
+        panel.title = L10n("Image_ChooseZipDialogTitle")
         
         if panel.runModal() == .OK, let url = panel.url {
             self.selectedLocalZipURL = url
@@ -784,20 +784,20 @@ struct ImageManagerView: View {
     
     private func startFlashing() {
         guard let box = state.activeBox, let storage = selectedStorage ?? storageDevices.first else {
-            state.showToast("Ei sopivaa tallennuslaitetta löytynyt väliaikaistiedostoille.", isError: true)
+            state.showToast(L10n("Toast_NoStorageFound"), isError: true)
             return
         }
         
         let source: FlashZipSource
         if flashSourceOption == .box {
             guard let item = selectedBoxBackupForFlash else {
-                state.showToast("Valitse boksissa oleva image.", isError: true)
+                state.showToast(L10n("Toast_SelectBoxBackup"), isError: true)
                 return
             }
             source = .boxBackup(path: item.remotePath, fileName: item.fileName)
         } else {
             guard let url = selectedLocalZipURL else {
-                state.showToast("Valitse paikallinen .zip-tiedosto.", isError: true)
+                state.showToast(L10n("Toast_SelectLocalZip"), isError: true)
                 return
             }
             source = .localFile(url: url)
@@ -805,7 +805,7 @@ struct ImageManagerView: View {
         
         isFlashing = true
         flashProgress = 0.1
-        flashStatusText = "Käynnistetään asennus..."
+        flashStatusText = L10n("Image_StartingFlash")
         
         Task {
             let (success, message) = await EnigmaBoxService.shared.flashImage(
@@ -826,7 +826,7 @@ struct ImageManagerView: View {
                 if success {
                     state.showToast(message)
                 } else {
-                    state.showToast("Asennusvirhe: \(message)", isError: true)
+                    state.showToast(L10n("Toast_FlashError", message), isError: true)
                 }
             }
             
@@ -836,7 +836,7 @@ struct ImageManagerView: View {
     
     private func downloadBackupToMac(item: ImageBackupItem) {
         let panel = NSSavePanel()
-        panel.title = "Tallenna varmuuskopio Macille"
+        panel.title = L10n("Image_SaveBackupTitle")
         panel.nameFieldStringValue = item.isFolder ? "\(item.fileName).zip" : item.fileName
         panel.allowedContentTypes = [UTType.zip]
         
@@ -861,9 +861,9 @@ struct ImageManagerView: View {
                     self.isDownloading = false
                     self.downloadingItem = nil
                     if ok {
-                        state.showToast("Varmuuskopio ladattu onnistuneesti Macille!")
+                        state.showToast(L10n("Toast_BackupDownloaded"))
                     } else {
-                        state.showToast("Latausvirhe: \(err ?? "Tuntematon virhe")", isError: true)
+                        state.showToast(L10n("Toast_DownloadError", err ?? L10n("Common_UnknownError")), isError: true)
                     }
                 }
             }

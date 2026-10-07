@@ -179,10 +179,10 @@ enum TunerCompatibility: Hashable {
     var badgeText: String {
         switch self {
         case .notTuner: return ""
-        case .compatible: return "Yhteensopiva"
-        case .incompatibleType: return "Eri tyyppi"
-        case .missingInTarget: return "Puuttuu kohteesta"
-        case .unknown: return "Ei tunnistettu"
+        case .compatible: return L10n("Sync_TunerCompatible")
+        case .incompatibleType: return L10n("Sync_TunerIncompatible")
+        case .missingInTarget: return L10n("Sync_TunerMissing")
+        case .unknown: return L10n("Sync_TunerUnknown")
         }
     }
     
@@ -665,7 +665,7 @@ public struct BoxStorageDevice: Identifiable, Hashable {
     }
     
     public var displayTitle: String {
-        "\(name) (\(mountPoint)) - \(formattedAvailable) vapaana"
+        "\(name) (\(mountPoint)) - \(formattedAvailable) \(L10n("Common_Vapaana"))"
     }
 }
 
@@ -686,9 +686,9 @@ public struct MultibootSlotInfo: Identifiable, Hashable {
         if let img = installedImage, !img.isEmpty {
             title = "Slot \(slot): \(img)"
         } else {
-            title = "Slot \(slot): (Tyhjä)"
+            title = "Slot \(slot): (\(L10n("Common_Tyhja")))"
         }
-        return isCurrent ? "\(title) [Aktiivinen]" : title
+        return isCurrent ? "\(title) [\(L10n("Common_Aktiivinen"))]" : title
     }
 }
 

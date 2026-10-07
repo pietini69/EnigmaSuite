@@ -300,7 +300,7 @@ struct BootlogoView: View {
     private func grabScreenshotFromBox() async {
         guard let box = state.activeBox else { return }
         isProcessing = true
-        state.showToast("Noudetaan kuva televisiosta")
+        state.showToast(L10n("Toast_FetchingTvScreenshot"))
         if let img = await EnigmaBoxService.shared.grabScreenshot(ip: box.ip, port: box.port, username: box.username, password: box.password) {
             // Tallennetaan tilapäistiedostoksi FFmpegiä varten
             let tempFile = FileManager.default.temporaryDirectory.appendingPathComponent("screenshot_\(UUID().uuidString).png")
@@ -308,21 +308,21 @@ struct BootlogoView: View {
                 try? png.write(to: tempFile)
                 self.sourceImageURL = tempFile
                 self.previewImage = img
-                state.showToast("Ruutukaappaus ladattu pohjakuvaksi!")
+                state.showToast(L10n("Toast_TvScreenshotLoaded"))
             }
         } else {
-            state.showToast("Kuvakaappauksen nouto epäonnistui", isError: true)
+            state.showToast(L10n("Toast_TvScreenshotFailed"), isError: true)
         }
         isProcessing = false
     }
     
     private func fetchBootlogoFromBox() async {
         guard let box = state.activeBox, !box.ip.isEmpty else {
-            state.showToast("Ei valittua boksia", isError: true)
+            state.showToast(L10n("Toast_NoActiveBox"), isError: true)
             return
         }
         isProcessing = true
-        state.showToast("Haetaan \(selectedBootlogo.rawValue) boksista (\(box.name))")
+        state.showToast(L10n("Toast_FetchingBootlogoFromBox", selectedBootlogo.rawValue, box.name))
         
         let (mviDataOpt, error) = await EnigmaBoxService.shared.downloadBootlogo(
             ip: box.ip,
@@ -335,12 +335,12 @@ struct BootlogoView: View {
         )
         
         guard let mviData = mviDataOpt, !mviData.isEmpty else {
-            state.showToast("Kuvan nouto epäonnistui: \(error ?? "Tuntematon virhe")", isError: true)
+            state.showToast(L10n("Toast_FetchBootlogoFailed", error ?? L10n("Common_UnknownError")), isError: true)
             isProcessing = false
             return
         }
         
-        state.showToast("Muunnetaan esikatselukuva")
+        state.showToast(L10n("Toast_ConvertingPreview"))
         if let img = await FFmpegService.shared.convertMviToImage(mviData: mviData) {
             let tempFile = FileManager.default.temporaryDirectory.appendingPathComponent("bootlogo_box_\(UUID().uuidString).png")
             if let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
@@ -348,13 +348,13 @@ struct BootlogoView: View {
                 self.sourceImageURL = tempFile
                 self.previewImage = img
                 self.generatedMviData = mviData
-                state.showToast("\(selectedBootlogo.rawValue) ladattu boksista esikatseluun!")
+                state.showToast(L10n("Toast_BootlogoLoadedPreview", selectedBootlogo.rawValue))
             } else {
                 self.previewImage = img
-                state.showToast("\(selectedBootlogo.rawValue) ladattu!")
+                state.showToast(L10n("Toast_BootlogoLoaded", selectedBootlogo.rawValue))
             }
         } else {
-            state.showToast("MVI-kuvan muunto esikatseluksi epäonnistui", isError: true)
+            state.showToast(L10n("Toast_MviConvertFailed"), isError: true)
         }
         isProcessing = false
     }
@@ -362,17 +362,17 @@ struct BootlogoView: View {
     private func convertAndUpload() async {
         guard let box = state.activeBox, let url = sourceImageURL else { return }
         isProcessing = true
-        state.showToast("Muunnetaan kuvaa .mvi -muotoon")
+        state.showToast(L10n("Toast_ConvertingMvi"))
         
         guard let mvi = await FFmpegService.shared.convertImageToMvi(sourceURL: url, resolution: resolution, scaling: scalingMode) else {
-            let detail = FFmpegService.shared.lastErrorMessage ?? "Muunnos epäonnistui"
-            state.showToast("FFmpeg-muunnos epäonnistui: \(detail)", isError: true)
+            let detail = FFmpegService.shared.lastErrorMessage ?? L10n("Common_ConversionFailed")
+            state.showToast(L10n("Toast_FfmpegFailed", detail), isError: true)
             isProcessing = false
             return
         }
         
         self.generatedMviData = mvi
-        state.showToast("Siirretään \(selectedBootlogo.rawValue) boksille (\(box.name))")
+        state.showToast(L10n("Toast_UploadingBootlogo", selectedBootlogo.rawValue, box.name))
         
         let res = await EnigmaBoxService.shared.uploadBootlogo(
             ip: box.ip,
@@ -386,9 +386,9 @@ struct BootlogoView: View {
         
         isProcessing = false
         if res.success {
-            state.showToast("Käynnistyskuva siirretty onnistuneesti boksille!")
+            state.showToast(L10n("Toast_BootlogoInstalled"))
         } else {
-            state.showToast("Siirto epäonnistui: \(res.error ?? "")", isError: true)
+            state.showToast(L10n("Toast_BootlogoUploadFailed", res.error ?? ""), isError: true)
         }
     }
     
@@ -417,19 +417,19 @@ struct BootlogoView: View {
                let data = rep.representation(using: fileType, properties: props) {
                 do {
                     try data.write(to: targetURL)
-                    state.showToast("Tallennettu: \(targetURL.lastPathComponent)")
+                    state.showToast(L10n("Toast_Saved", targetURL.lastPathComponent))
                 } catch {
-                    state.showToast("Tallennus epäonnistui: \(error.localizedDescription)", isError: true)
+                    state.showToast(L10n("Toast_SaveFailed", error.localizedDescription), isError: true)
                 }
             } else {
-                state.showToast("Kuvan muunto tallennukseen epäonnistui", isError: true)
+                state.showToast(L10n("Toast_MviConvertFailed"), isError: true)
             }
         }
     }
     
     private func saveMviToMac() async {
         isProcessing = true
-        state.showToast("Valmistellaan MVI-tiedostoa")
+        state.showToast(L10n("Toast_PreparingMvi"))
         
         let mviToSave: Data?
         if let existing = generatedMviData {
@@ -441,8 +441,8 @@ struct BootlogoView: View {
         }
         
         guard let mvi = mviToSave else {
-            let detail = FFmpegService.shared.lastErrorMessage ?? "Muunnos epäonnistui"
-            state.showToast("FFmpeg-muunnos epäonnistui: \(detail)", isError: true)
+            let detail = FFmpegService.shared.lastErrorMessage ?? L10n("Common_ConversionFailed")
+            state.showToast(L10n("Toast_FfmpegFailed", detail), isError: true)
             isProcessing = false
             return
         }
@@ -456,21 +456,21 @@ struct BootlogoView: View {
         if savePanel.runModal() == .OK, let targetURL = savePanel.url {
             do {
                 try mvi.write(to: targetURL)
-                state.showToast("Tallennettu: \(targetURL.lastPathComponent)")
+                state.showToast(L10n("Toast_Saved", targetURL.lastPathComponent))
             } catch {
-                state.showToast("Tallennus epäonnistui", isError: true)
+                state.showToast(L10n("Toast_SaveFailed", error.localizedDescription), isError: true)
             }
         }
     }
     
     private func restartGUI() async {
         guard let box = state.activeBox else { return }
-        state.showToast("Käynnistetään Enigma2 GUI uudelleen")
+        state.showToast(L10n("Toast_RestartingGui"))
         let ok = await EnigmaBoxService.shared.setPowerState(ip: box.ip, state: 3, port: box.port, username: box.username, password: box.password)
         if ok {
-            state.showToast("GUI-käynnistyskomento lähetetty!")
+            state.showToast(L10n("Toast_RestartGuiSent"))
         } else {
-            state.showToast("Komento epäonnistui", isError: true)
+            state.showToast(L10n("Toast_CommandFailed"), isError: true)
         }
     }
 }

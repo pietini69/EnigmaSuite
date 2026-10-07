@@ -93,6 +93,7 @@ struct ContentView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.25), value: state.toastMessage)
+            .id(l10n.effectiveLanguage)
         }
         .toolbar {
             // Aktiivisen laitteen valitsin
@@ -189,12 +190,12 @@ struct ContentView: View {
     private func powerCommand(_ stateCode: Int) {
         guard let box = state.activeBox else { return }
         Task {
-            state.showToast("Lähetetään virtakomento")
+            state.showToast(L10n("Toast_SendingPower"))
             let ok = await EnigmaBoxService.shared.setPowerState(ip: box.ip, state: stateCode, port: box.port, username: box.username, password: box.password)
             if ok {
-                state.showToast("Virtakomento suoritettu!")
+                state.showToast(L10n("Toast_PowerExecuted"))
             } else {
-                state.showToast("Virtakomento epäonnistui", isError: true)
+                state.showToast(L10n("Toast_PowerFailed"), isError: true)
             }
         }
     }

@@ -277,9 +277,9 @@ struct SettingsSyncView: View {
             .tint(.green)
             .disabled(selectedCount == 0 || isSyncing || targetBox?.ip.hasPrefix("package://") == true || !isTargetOnline)
             .help(
-                targetBox?.ip.hasPrefix("package://") == true ? "Kohde on asennuspaketti (vain luku)" :
-                (!isTargetOnline ? "Kohdeboksi ei ole linjoilla (FTP-yhteyttä ei saada)" :
-                "Synkronoi valitut asetukset kohdeboksille")
+                targetBox?.ip.hasPrefix("package://") == true ? L10n("Sync_TargetIsPackageReadOnly") :
+                (!isTargetOnline ? L10n("Sync_TargetOfflineHelp") :
+                L10n("Sync_SyncSelectedHelp"))
             )
             .padding(.top, 14)
         }
@@ -602,9 +602,9 @@ struct SettingsSyncView: View {
     
     private func openPackageFileDialog(isSource: Bool) {
         let panel = NSOpenPanel()
-        panel.title = "Valitse asennuspaketti tai asetustiedosto"
-        panel.prompt = "Avaa"
-        panel.message = "Valitse rootfs.tar.bz2, asennusimage (.zip), kansio tai settings-tiedosto"
+        panel.title = L10n("Sync_OpenDialogTitle")
+        panel.prompt = L10n("Sync_OpenDialogPrompt")
+        panel.message = L10n("Sync_OpenDialogMessage")
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
@@ -626,7 +626,7 @@ struct SettingsSyncView: View {
     
     private func loadPackageFromURL(_ url: URL, isSource: Bool) async {
         isExtractingPackage = true
-        state.showToast("Puretaan asetuksia tiedostosta \(url.lastPathComponent)")
+        state.showToast(L10n("Toast_ExtractingSettings", url.lastPathComponent))
         
         let result = await RootfsPackageService.shared.extractSettings(from: url)
         isExtractingPackage = false
@@ -647,10 +647,10 @@ struct SettingsSyncView: View {
             } else {
                 targetBox = box
             }
-            state.showToast("Asennuspaketin asetukset (\(info.settings.count) kpl) ladattu onnistuneesti!")
+            state.showToast(L10n("Toast_PackageSettingsLoaded", info.settings.count))
             await fetchAllSettings()
         } else {
-            state.showToast(result.error ?? "Asetusten purku epäonnistui", isError: true)
+            state.showToast(result.error ?? L10n("Toast_ExtractFailed"), isError: true)
         }
     }
     
@@ -711,30 +711,30 @@ struct SettingsSyncView: View {
         
         isLoading = false
         if sData.error == nil && tData.error == nil {
-            state.showToast("Asetukset noudettu ja vertailtu onnistuneesti!")
+            state.showToast(L10n("Toast_SettingsFetched"))
         }
     }
     
     private func performSync() async {
         guard let target = resolvedTargetBox else { return }
         if target.ip.hasPrefix("package://") {
-            state.showToast("Kohde on asennuspaketti (vain luku). Valitse kohteeksi aktiivinen digiboksi.", isError: true)
+            state.showToast(L10n("Toast_TargetIsPackageReadOnly"), isError: true)
             return
         }
         
         guard isTargetOnline else {
-            state.showToast("Kohdeboksi \(target.name) (\(target.ip)) ei ole linjoilla.", isError: true)
+            state.showToast(L10n("Toast_TargetOffline", target.name, target.ip), isError: true)
             return
         }
         
         isSyncing = true
         
         // 0. Tarkistetaan FTP-yhteys nopeasti ennen init 4 -komennon suorittamista
-        state.showToast("Tarkistetaan FTP-yhteys kohteeseen \(target.ip)...")
+        state.showToast(L10n("Toast_CheckingFtp", target.ip))
         let canConnect = await EnigmaBoxService.shared.checkFTPConnection(ip: target.ip, username: target.username, password: target.password)
         guard canConnect else {
             isSyncing = false
-            state.showToast("FTP-yhteys kohteeseen \(target.name) (\(target.ip)) epäonnistui. Varmista että laite on päällä ja verkossa.", isError: true)
+            state.showToast(L10n("Toast_FtpFailed", target.name, target.ip), isError: true)
             return
         }
         
@@ -751,7 +751,7 @@ struct SettingsSyncView: View {
         //    a) init 4 (pysäyttää Enigma2 niin se ei ylikirjoita muistissa olevilla asetuksilla)
         //    b) siirretään uusi /etc/enigma2/settings FTP:llä
         //    c) init 3 (käynnistää Enigma2 uusilla asetuksilla)
-        state.showToast("Pysäytetään Enigma2 (init 4)")
+        state.showToast(L10n("Toast_StoppingEnigma2"))
         let stopped = await EnigmaBoxService.shared.runTelnetCommand(ip: target.ip, command: "init 4", username: target.username, password: target.password)
         if !stopped {
             print("[SettingsSync] Telnet init 4 varoitus, yritetään silti siirtoa...")
@@ -759,21 +759,21 @@ struct SettingsSyncView: View {
         
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         
-        state.showToast("Siirretään uudet asetukset boksille")
+        state.showToast(L10n("Toast_UploadingSettings"))
         let upload = await EnigmaBoxService.shared.uploadSettings(ip: target.ip, content: newContent, port: target.port, username: target.username, password: target.password)
         guard upload.success else {
-            state.showToast("Asetusten siirto epäonnistui: \(upload.error ?? "")", isError: true)
+            state.showToast(L10n("Toast_UploadSettingsFailed", upload.error ?? ""), isError: true)
             let _ = await EnigmaBoxService.shared.runTelnetCommand(ip: target.ip, command: "init 3", username: target.username, password: target.password)
             isSyncing = false
             return
         }
         
-        state.showToast("Käynnistetään Enigma2 uudelleen (init 3)")
+        state.showToast(L10n("Toast_RestartingEnigma2"))
         let _ = await EnigmaBoxService.shared.runTelnetCommand(ip: target.ip, command: "init 3", username: target.username, password: target.password)
         
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         isSyncing = false
-        state.showToast("Asetukset synkronoitu onnistuneesti kohteeseen \(target.name)!")
+        state.showToast(L10n("Toast_SettingsSynced", target.name))
         
         // Noudetaan uudet asetukset automaattisesti
         await fetchAllSettings()
@@ -828,30 +828,30 @@ struct SettingsSyncView: View {
               let content = try? String(contentsOf: rec.fileURL, encoding: .utf8) else { return }
         
         guard isTargetOnline else {
-            state.showToast("Kohdeboksi \(target.name) (\(target.ip)) ei ole linjoilla.", isError: true)
+            state.showToast(L10n("Toast_TargetOffline", target.name, target.ip), isError: true)
             return
         }
         
         Task {
             showBackupsSheet = false
-            state.showToast("Tarkistetaan yhteys kohteeseen \(target.ip)...")
+            state.showToast(L10n("Toast_CheckingFtp", target.ip))
             let canConnect = await EnigmaBoxService.shared.checkFTPConnection(ip: target.ip, username: target.username, password: target.password)
             guard canConnect else {
-                state.showToast("FTP-yhteys kohteeseen \(target.name) (\(target.ip)) epäonnistui.", isError: true)
+                state.showToast(L10n("Toast_FtpFailed", target.name, target.ip), isError: true)
                 return
             }
             
-            state.showToast("Palautetaan varmuuskopio")
+            state.showToast(L10n("Toast_RestoringBackup"))
             let _ = await EnigmaBoxService.shared.runTelnetCommand(ip: target.ip, command: "init 4", username: target.username, password: target.password)
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             let res = await EnigmaBoxService.shared.uploadSettings(ip: target.ip, content: content, port: target.port, username: target.username, password: target.password)
             let _ = await EnigmaBoxService.shared.runTelnetCommand(ip: target.ip, command: "init 3", username: target.username, password: target.password)
             
             if res.success {
-                state.showToast("Varmuuskopio palautettu onnistuneesti!")
+                state.showToast(L10n("Toast_BackupRestored"))
                 await fetchAllSettings()
             } else {
-                state.showToast("Palautus epäonnistui: \(res.error ?? "")", isError: true)
+                state.showToast(L10n("Toast_RestoreFailed", res.error ?? ""), isError: true)
             }
         }
     }

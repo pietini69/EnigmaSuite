@@ -96,7 +96,7 @@ struct ChannelManagerView: View {
                     ProgressView()
                         .scaleEffect(1.4)
                     
-                    Text("Päivitetään digiboksin kanavatietokantaa")
+                    Text(L10n("Channels_DbUpdating"))
                         .font(.headline)
                         .foregroundColor(.white)
                     
@@ -106,7 +106,7 @@ struct ChannelManagerView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                     
-                    Text("Boksin käyttöliittymä käynnistetään uudelleen (init 4 -> init 3).")
+                    Text(L10n("Channels_InitNotice"))
                         .font(.caption)
                         .foregroundColor(.gray)
                 }
@@ -240,22 +240,22 @@ struct ChannelManagerView: View {
                 .listStyle(.sidebar)
             }
         }
-        .alert("Uusi suosikkilista", isPresented: $showNewBouquetAlert) {
-            TextField("Listan nimi (esim. Urheilu)", text: $newBouquetName)
-            Button("Luo") {
+        .alert(L10n("Channels_AlertNewBouquet"), isPresented: $showNewBouquetAlert) {
+            TextField(L10n("Channels_AlertNewBouquetNamePlaceholder"), text: $newBouquetName)
+            Button(L10n("Channels_AlertCreate")) {
                 Task { await createBouquet() }
             }
-            Button("Peruuta", role: .cancel) {}
+            Button(L10n("Common_Cancel"), role: .cancel) {}
         } message: {
-            Text("Syötä nimi uudelle \(isRadioMode ? "radio" : "TV")-suosikkilistalle:")
+            Text(L10n("Channels_PromptNewBouquet", isRadioMode ? "radio" : "TV"))
         }
-        .alert("Poista suosikkilista?", isPresented: $showDeleteBouquetAlert, presenting: bouquetToDelete) { b in
-            Button("Poista", role: .destructive) {
+        .alert(L10n("Channels_AlertDeleteBouquet"), isPresented: $showDeleteBouquetAlert, presenting: bouquetToDelete) { b in
+            Button(L10n("Common_Delete"), role: .destructive) {
                 Task { await confirmDeleteBouquet(b) }
             }
-            Button("Peruuta", role: .cancel) {}
+            Button(L10n("Common_Cancel"), role: .cancel) {}
         } message: { b in
-            Text("Haluatko varmasti poistaa suosikkilistan '\(b.name)' boksista?")
+            Text(L10n("Channels_DeleteBouquetConfirm", b.name))
         }
     }
     
@@ -329,25 +329,25 @@ struct ChannelManagerView: View {
                             Button(action: {
                                 showDeleteSelectedAlert = true
                             }) {
-                                Label("Poista", systemImage: "trash")
+                                Label(L10n("Common_Delete"), systemImage: "trash")
                                     .font(.caption)
                                     .foregroundColor(.red)
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help("Poista valitut kanavat suosikkilistalta")
+                            .help(L10n("Channels_DeleteSelectedHelp"))
                         } else {
                             Button(action: {
                                 showDeleteAllAlert = true
                             }) {
-                                Label("Tyhjennä lista", systemImage: "trash.slash")
+                                Label(L10n("Channels_ClearList"), systemImage: "trash.slash")
                                     .font(.caption)
                                     .foregroundColor(.red)
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .disabled(channels.isEmpty)
-                            .help("Poista kaikki kanavat tältä suosikkilistalta")
+                            .help(L10n("Channels_ClearListHelp"))
                         }
                     } else {
                         if !selectedChannelIds.isEmpty {
@@ -359,7 +359,7 @@ struct ChannelManagerView: View {
                                         }
                                     }
                                 } label: {
-                                    Label("Suosikit", systemImage: "plus.circle")
+                                    Label(L10n("Channels_Bouquets"), systemImage: "plus.circle")
                                         .font(.caption)
                                 }
                                 .menuStyle(.borderedButton)
@@ -369,25 +369,25 @@ struct ChannelManagerView: View {
                             Button(action: {
                                 showDeleteSelectedLamedbAlert = true
                             }) {
-                                Label("Poista", systemImage: "trash")
+                                Label(L10n("Common_Delete"), systemImage: "trash")
                                     .font(.caption)
                                     .foregroundColor(.red)
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help("Poista valitut kanavat pysyvästi digiboksin kanavatietokannasta (lamedb)")
+                            .help(L10n("Channels_DeleteLamedbSelectedHelp"))
                         } else {
                             Button(action: {
                                 showDeleteAllLamedbAlert = true
                             }) {
-                                Label("Poista kaikki boksista", systemImage: "trash.slash")
+                                Label(L10n("Channels_DeleteLamedbAll"), systemImage: "trash.slash")
                                     .font(.caption)
                                     .foregroundColor(.red)
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .disabled(channels.isEmpty)
-                            .help("Poista kaikki kanavat digiboksin lamedb-tietokannasta (init 4/3)")
+                            .help(L10n("Channels_DeleteLamedbAllHelp"))
                         }
                     }
                 }
@@ -397,7 +397,7 @@ struct ChannelManagerView: View {
             Divider()
             
             if isLoadingChannels {
-                ProgressView("Ladataan kanavia")
+                ProgressView(L10n("Channels_LoadingChannels"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if filteredChannels.isEmpty {
                 emptyChannelsView
@@ -415,53 +415,53 @@ struct ChannelManagerView: View {
                 }
             }
         }
-        .alert("Poista kanava listalta?", isPresented: $showDeleteChannelAlert, presenting: channelToDelete) { ch in
-            Button("Poista", role: .destructive) {
+        .alert(L10n("Channels_AlertDeleteChannel"), isPresented: $showDeleteChannelAlert, presenting: channelToDelete) { ch in
+            Button(L10n("Common_Delete"), role: .destructive) {
                 Task { await confirmDeleteChannel(ch) }
             }
-            Button("Peruuta", role: .cancel) {}
+            Button(L10n("Common_Cancel"), role: .cancel) {}
         } message: { ch in
-            Text("Haluatko poistaa kanavan '\(ch.name)' suosikkilistalta '\(currentBouquet?.name ?? "")'?")
+            Text(L10n("Channels_DeleteChannelConfirm", ch.name, currentBouquet?.name ?? ""))
         }
-        .alert("Poista valitut kanavat?", isPresented: $showDeleteSelectedAlert) {
-            Button("Poista \(selectedChannelIds.count) kanavaa", role: .destructive) {
+        .alert(L10n("Channels_AlertDeleteSelected"), isPresented: $showDeleteSelectedAlert) {
+            Button("\(L10n("Common_Delete")) (\(selectedChannelIds.count))", role: .destructive) {
                 Task { await confirmDeleteSelectedChannels() }
             }
-            Button("Peruuta", role: .cancel) {}
+            Button(L10n("Common_Cancel"), role: .cancel) {}
         } message: {
-            Text("Haluatko varmasti poistaa \(selectedChannelIds.count) valittua kanavaa suosikkilistalta '\(currentBouquet?.name ?? "")'?")
+            Text(L10n("Channels_DeleteSelectedConfirm", selectedChannelIds.count, currentBouquet?.name ?? ""))
         }
-        .alert("Poista kaikki kanavat?", isPresented: $showDeleteAllAlert) {
-            Button("Poista kaikki kanavat", role: .destructive) {
+        .alert(L10n("Channels_AlertDeleteAll"), isPresented: $showDeleteAllAlert) {
+            Button(L10n("Channels_ClearList"), role: .destructive) {
                 Task { await confirmDeleteAllChannels() }
             }
-            Button("Peruuta", role: .cancel) {}
+            Button(L10n("Common_Cancel"), role: .cancel) {}
         } message: {
-            Text("Haluatko varmasti poistaa kaikki \(channels.count) kanavaa suosikkilistalta '\(currentBouquet?.name ?? "")'?")
+            Text(L10n("Channels_DeleteAllConfirm", channels.count, currentBouquet?.name ?? ""))
         }
-        .alert("Poista kanava pysyvästi boksista?", isPresented: $showDeleteSingleLamedbAlert, presenting: channelToDeleteFromLamedb) { ch in
-            Button("Poista pysyvästi (init 4/3)", role: .destructive) {
+        .alert(L10n("Channels_AlertDeleteLamedbSingle"), isPresented: $showDeleteSingleLamedbAlert, presenting: channelToDeleteFromLamedb) { ch in
+            Button(L10n("Channels_DeletePermanentlyAction"), role: .destructive) {
                 Task { await deleteSingleChannelFromLamedb(ch) }
             }
-            Button("Peruuta", role: .cancel) {}
+            Button(L10n("Common_Cancel"), role: .cancel) {}
         } message: { ch in
-            Text("Haluatko varmasti poistaa kanavan '\(ch.name)' pysyvästi digiboksin kanavatietokannasta (lamedb)?\n\nTämä pysäyttää boksin käyttöliittymän (init 4), muokkaa lamedb-tiedostoa ja käynnistää käyttöliittymän uudelleen (init 3).")
+            Text(L10n("Channels_AlertDeleteLamedbSingleMsg", ch.name))
         }
-        .alert("Poista valitut kanavat boksista?", isPresented: $showDeleteSelectedLamedbAlert) {
-            Button("Poista \(selectedChannelIds.count) kanavaa (init 4/3)", role: .destructive) {
+        .alert(L10n("Channels_AlertDeleteLamedbSelected"), isPresented: $showDeleteSelectedLamedbAlert) {
+            Button("\(L10n("Channels_DeletePermanentlyAction")) (\(selectedChannelIds.count))", role: .destructive) {
                 Task { await deleteSelectedChannelsFromLamedb() }
             }
-            Button("Peruuta", role: .cancel) {}
+            Button(L10n("Common_Cancel"), role: .cancel) {}
         } message: {
-            Text("Haluatko varmasti poistaa \(selectedChannelIds.count) valittua kanavaa pysyvästi digiboksin lamedb-tietokannasta?\n\nTämä pysäyttää boksin käyttöliittymän (init 4), poistaa kanavat ja käynnistää käyttöliittymän uudelleen (init 3).")
+            Text(L10n("Channels_AlertDeleteLamedbSelectedMsg", selectedChannelIds.count))
         }
-        .alert("Poista KAIKKI kanavat boksista?", isPresented: $showDeleteAllLamedbAlert) {
-            Button("Tyhjennä kaikki kanavat (init 4/3)", role: .destructive) {
+        .alert(L10n("Channels_AlertDeleteLamedbAll"), isPresented: $showDeleteAllLamedbAlert) {
+            Button(L10n("Channels_ClearAllAction"), role: .destructive) {
                 Task { await deleteAllChannelsFromLamedb() }
             }
-            Button("Peruuta", role: .cancel) {}
+            Button(L10n("Common_Cancel"), role: .cancel) {}
         } message: {
-            Text("VAROITUS: Haluatko varmasti poistaa kaikki \(channels.count) kanavaa pysyvästi digiboksin lamedb-tietokannasta?\n\nTämä tyhjentää viritetyt kanavat boksista (init 4/3). Kanavat pitää virittää uudelleen jos haluat ne takaisin.")
+            Text(L10n("Channels_AlertDeleteLamedbAllMsg", channels.count))
         }
     }
     
@@ -470,14 +470,14 @@ struct ChannelManagerView: View {
             Image(systemName: "tv.slash")
                 .font(.largeTitle)
                 .foregroundColor(.secondary)
-            Text(isShowingAllChannels ? "Ei kanavia löytynyt" : "Suosikkilista on tyhjä")
+            Text(isShowingAllChannels ? L10n("Channels_EmptyChannels") : L10n("Channels_EmptyBouquet"))
                 .foregroundColor(.secondary)
             if isShowingAllChannels {
-                Text("Tarkista virittimen kanavahaku boksilla.")
+                Text(L10n("Channels_CheckTunerPrompt"))
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
-                Text("Voit lisätä kanavia 'Kaikki kanavat' -näkymästä.")
+                Text(L10n("Channels_AddFromAllPrompt"))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -498,7 +498,7 @@ struct ChannelManagerView: View {
                     .font(.body)
             }
             .buttonStyle(.borderless)
-            .help("Valitse kanava")
+            .help(L10n("Channels_SelectChannel"))
             
             // Järjestysnumero
             Text("\(index + 1)")
@@ -523,7 +523,7 @@ struct ChannelManagerView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(index == 0)
-                .help("Siirrä ylemmäs")
+                .help(L10n("Channels_MoveUp"))
                 
                 Button(action: {
                     Task { await moveChannelItem(channel: channel, fromIndex: index, toIndex: index + 1) }
@@ -533,7 +533,7 @@ struct ChannelManagerView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(index == channels.count - 1)
-                .help("Siirrä alemmas")
+                .help(L10n("Channels_MoveDown"))
             } else {
                 // Lisää suosikkiin
                 Menu {
@@ -548,7 +548,7 @@ struct ChannelManagerView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .frame(width: 20)
-                .help("Lisää suosikkilistaan")
+                .help(L10n("Channels_AddToBouquet"))
             }
             
             // Vaihda kanavalle (Zap)
@@ -559,7 +559,7 @@ struct ChannelManagerView: View {
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help("Vaihda televisio tälle kanavalle")
+            .help(L10n("Channels_ZapHelp"))
             
             // Toista Macilla (VLC)
             Button(action: {
@@ -570,7 +570,7 @@ struct ChannelManagerView: View {
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help("Toista striimi Macilla / VLC:llä")
+            .help(L10n("Channels_StreamHelp"))
             
             if !isShowingAllChannels {
                 // Poista kanava suosikkilistalta
@@ -583,7 +583,7 @@ struct ChannelManagerView: View {
                         .font(.caption2)
                 }
                 .buttonStyle(.borderless)
-                .help("Poista kanava suosikkilistalta")
+                .help(L10n("Channels_DeleteFromBouquetHelp"))
             } else {
                 // Poista kanava boksista (lamedb)
                 Button(action: {
@@ -595,7 +595,7 @@ struct ChannelManagerView: View {
                         .font(.caption2)
                 }
                 .buttonStyle(.borderless)
-                .help("Poista kanava pysyvästi digiboksin kanavatietokannasta (lamedb)")
+                .help(L10n("Channels_DeleteFromLamedbHelp"))
             }
         }
         .contentShape(Rectangle())
@@ -610,13 +610,13 @@ struct ChannelManagerView: View {
         Button {
             zapTo(channel)
         } label: {
-            Label("Vaihda kanavalle", systemImage: "tv.badge.wifi")
+            Label(L10n("Channels_ZapToTv"), systemImage: "tv.badge.wifi")
         }
         
         Button {
             state.openInVLC(sRef: channel.id)
         } label: {
-            Label("Toista Macilla (VLC)", systemImage: "play.circle")
+            Label(L10n("Channels_StreamVlc"), systemImage: "play.circle")
         }
         
         Divider()
@@ -625,28 +625,28 @@ struct ChannelManagerView: View {
             Button {
                 Task { await moveChannelItem(channel: channel, fromIndex: index, toIndex: 0) }
             } label: {
-                Label("Siirrä alkuun (sijalle 1)", systemImage: "arrow.up.to.line")
+                Label(L10n("Channels_MoveToTop"), systemImage: "arrow.up.to.line")
             }
             .disabled(index == 0)
             
             Button {
                 Task { await moveChannelItem(channel: channel, fromIndex: index, toIndex: index - 1) }
             } label: {
-                Label("Siirrä ylemmäs", systemImage: "chevron.up")
+                Label(L10n("Channels_MoveUp"), systemImage: "chevron.up")
             }
             .disabled(index == 0)
             
             Button {
                 Task { await moveChannelItem(channel: channel, fromIndex: index, toIndex: index + 1) }
             } label: {
-                Label("Siirrä alemmas", systemImage: "chevron.down")
+                Label(L10n("Channels_MoveDown"), systemImage: "chevron.down")
             }
             .disabled(index == channels.count - 1)
             
             Button {
                 Task { await moveChannelItem(channel: channel, fromIndex: index, toIndex: channels.count - 1) }
             } label: {
-                Label("Siirrä loppuun", systemImage: "arrow.down.to.line")
+                Label(L10n("Channels_MoveToBottom"), systemImage: "arrow.down.to.line")
             }
             .disabled(index == channels.count - 1)
             
@@ -656,10 +656,10 @@ struct ChannelManagerView: View {
                 channelToDelete = channel
                 showDeleteChannelAlert = true
             } label: {
-                Label("Poista kanava listalta", systemImage: "trash")
+                Label(L10n("Channels_DeleteFromBouquetHelp"), systemImage: "trash")
             }
         } else {
-            Menu("Lisää suosikkilistaan") {
+            Menu(L10n("Channels_AddToBouquet")) {
                 ForEach(bouquets) { b in
                     Button(b.name) {
                         Task { await addChannelToBouquet(channel, bouquet: b) }
@@ -673,7 +673,7 @@ struct ChannelManagerView: View {
                 channelToDeleteFromLamedb = channel
                 showDeleteSingleLamedbAlert = true
             } label: {
-                Label("Poista pysyvästi boksista (lamedb)", systemImage: "trash")
+                Label(L10n("Channels_DeleteFromLamedbHelp"), systemImage: "trash")
             }
         }
     }
@@ -712,7 +712,7 @@ struct ChannelManagerView: View {
                                     }
                                 }
                             } label: {
-                                Label("Suosikkeihin", systemImage: "plus.circle")
+                                Label(L10n("Channels_AddToBouquets"), systemImage: "plus.circle")
                             }
                             .menuStyle(.borderedButton)
                         }
@@ -840,7 +840,7 @@ struct ChannelManagerView: View {
         guard let box = state.activeBox else { return }
         _ = await EnigmaBoxService.shared.reloadServiceList(ip: box.ip, port: box.port, username: box.username, password: box.password)
         await loadChannelsForCurrentSelection()
-        state.showToast("Kanavalista päivitetty!")
+        state.showToast(L10n("Toast_ChannelListReloaded"))
     }
     
     private func fetchEPG(for channel: Channel) async {
@@ -880,9 +880,9 @@ struct ChannelManagerView: View {
         
         let (ok, msg) = await EnigmaBoxService.shared.moveChannel(ip: box.ip, bouquetRef: b.id, channelRef: channel.id, position: toIndex, port: box.port, username: box.username, password: box.password)
         if ok {
-            state.showToast("Siirretty: \(channel.name) -> sijalle \(toIndex + 1)")
+            state.showToast(L10n("Toast_MovedPosition", channel.name, toIndex + 1))
         } else {
-            state.showToast("Siirto epäonnistui: \(msg)", isError: true)
+            state.showToast(L10n("Toast_MoveFailed", msg), isError: true)
             await loadChannelsForCurrentSelection()
         }
     }
@@ -898,9 +898,9 @@ struct ChannelManagerView: View {
         Task {
             let (ok, msg) = await EnigmaBoxService.shared.moveChannel(ip: box.ip, bouquetRef: b.id, channelRef: channel.id, position: targetIndex, port: box.port, username: box.username, password: box.password)
             if ok {
-                state.showToast("Siirretty: \(channel.name)")
+                state.showToast(L10n("Toast_Moved", channel.name))
             } else {
-                state.showToast("Siirto epäonnistui: \(msg)", isError: true)
+                state.showToast(L10n("Toast_MoveFailed", msg), isError: true)
                 await loadChannelsForCurrentSelection()
             }
         }
@@ -910,47 +910,47 @@ struct ChannelManagerView: View {
     private func createBouquet() async {
         guard let box = state.activeBox, !newBouquetName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         let name = newBouquetName.trimmingCharacters(in: .whitespaces)
-        state.showToast("Luodaan suosikkilistaa '\(name)'")
+        state.showToast(L10n("Toast_CreatingBouquet", name))
         let (ok, msg) = await EnigmaBoxService.shared.addBouquet(ip: box.ip, name: name, isRadio: isRadioMode, port: box.port, username: box.username, password: box.password)
         if ok {
-            state.showToast("Suosikkilista '\(name)' luotu!")
+            state.showToast(L10n("Toast_BouquetCreated", name))
             await loadInitialData()
             if let created = bouquets.first(where: { $0.name == name }) {
                 selectedSourceId = created.id
             }
         } else {
-            state.showToast("Luonti epäonnistui: \(msg)", isError: true)
+            state.showToast(L10n("Toast_BouquetCreateFailed", msg), isError: true)
         }
     }
     
     private func confirmDeleteBouquet(_ bouquet: Bouquet) async {
         guard let box = state.activeBox else { return }
-        state.showToast("Poistetaan suosikkilistaa '\(bouquet.name)'")
+        state.showToast(L10n("Toast_DeletingBouquet", bouquet.name))
         let (ok, msg) = await EnigmaBoxService.shared.deleteBouquet(ip: box.ip, bouquetRef: bouquet.id, isRadio: isRadioMode, port: box.port, username: box.username, password: box.password)
         if ok {
-            state.showToast("Suosikkilista '\(bouquet.name)' poistettu!")
+            state.showToast(L10n("Toast_BouquetDeleted", bouquet.name))
             if selectedSourceId == bouquet.id {
                 selectedSourceId = allChannelsTag
             }
             await loadInitialData()
         } else {
-            state.showToast("Poisto epäonnistui: \(msg)", isError: true)
+            state.showToast(L10n("Toast_DeleteFailed"), isError: true)
         }
     }
     
     private func confirmDeleteChannel(_ channel: Channel) async {
         guard let box = state.activeBox, let bouquet = currentBouquet else { return }
-        state.showToast("Poistetaan kanavaa '\(channel.name)'")
+        state.showToast(L10n("Toast_DeletingChannel", channel.name))
         let (ok, msg) = await EnigmaBoxService.shared.deleteChannelFromBouquet(ip: box.ip, bouquetRef: bouquet.id, channelRef: channel.id, port: box.port, username: box.username, password: box.password)
         if ok {
-            state.showToast("Kanava '\(channel.name)' poistettu listalta!")
+            state.showToast(L10n("Toast_ChannelDeleted", channel.name))
             selectedChannelIds.remove(channel.id)
             if selectedChannel?.id == channel.id {
                 selectedChannel = nil
             }
             await loadChannelsForCurrentSelection()
         } else {
-            state.showToast("Poisto epäonnistui: \(msg)", isError: true)
+            state.showToast(L10n("Toast_DeleteFailed"), isError: true)
         }
     }
     
@@ -959,14 +959,14 @@ struct ChannelManagerView: View {
         let idsToDelete = Array(selectedChannelIds)
         guard !idsToDelete.isEmpty else { return }
         
-        state.showToast("Poistetaan \(idsToDelete.count) kanavaa")
+        state.showToast(L10n("Toast_DeletingSelectedChannels", idsToDelete.count))
         let (ok, count) = await EnigmaBoxService.shared.deleteMultipleChannelsFromBouquet(ip: box.ip, bouquetRef: bouquet.id, channelRefs: idsToDelete, port: box.port, username: box.username, password: box.password)
         if ok {
-            state.showToast("\(count) kanavaa poistettu suosikkilistalta!")
+            state.showToast(L10n("Toast_SelectedChannelsDeleted", count))
             selectedChannelIds.removeAll()
             await loadChannelsForCurrentSelection()
         } else {
-            state.showToast("Poisto epäonnistui", isError: true)
+            state.showToast(L10n("Toast_DeleteFailed"), isError: true)
         }
     }
     
@@ -975,15 +975,15 @@ struct ChannelManagerView: View {
         let allIds = channels.map { $0.id }
         guard !allIds.isEmpty else { return }
         
-        state.showToast("Poistetaan kaikki kanavat suosikkilistalta")
+        state.showToast(L10n("Toast_DeletingAllChannels"))
         let (ok, count) = await EnigmaBoxService.shared.deleteMultipleChannelsFromBouquet(ip: box.ip, bouquetRef: bouquet.id, channelRefs: allIds, port: box.port, username: box.username, password: box.password)
         if ok {
-            state.showToast("Kaikki (\(count)) kanavaa poistettu suosikkilistalta!")
+            state.showToast(L10n("Toast_AllChannelsDeleted", count))
             selectedChannelIds.removeAll()
             selectedChannel = nil
             await loadChannelsForCurrentSelection()
         } else {
-            state.showToast("Poisto epäonnistui", isError: true)
+            state.showToast(L10n("Toast_DeleteFailed"), isError: true)
         }
     }
     
@@ -991,7 +991,7 @@ struct ChannelManagerView: View {
     private func deleteSingleChannelFromLamedb(_ channel: Channel) async {
         guard let box = state.activeBox else { return }
         isPerformingLamedbOperation = true
-        lamedbProgressText = "Aloitetaan kanavan '\(channel.name)' poisto"
+        lamedbProgressText = L10n("Toast_DeletingChannel", channel.name)
         
         let (ok, _, msg) = await EnigmaBoxService.shared.deleteChannelsGloballyFromLamedb(
             ip: box.ip,
@@ -1007,7 +1007,7 @@ struct ChannelManagerView: View {
         
         isPerformingLamedbOperation = false
         if ok {
-            state.showToast("Kanava '\(channel.name)' poistettu pysyvästi boksista!")
+            state.showToast(L10n("Toast_ChannelDeletedPermanently", channel.name))
             selectedChannelIds.remove(channel.id)
             if selectedChannel?.id == channel.id {
                 selectedChannel = nil
@@ -1027,7 +1027,7 @@ struct ChannelManagerView: View {
         
         // Jos käyttäjä on valinnut kaikki kanavat, tyhjennetään tietokanta puhtaasti
         if isShowingAllChannels && idsToDelete.count >= channels.count {
-            lamedbProgressText = "Tyhjennetään kaikki kanavat boksista"
+            lamedbProgressText = L10n("Channels_ClearAllAction")
             let (ok, count, msg) = await EnigmaBoxService.shared.clearAllChannelsGloballyFromLamedb(
                 ip: box.ip,
                 port: box.port,
@@ -1041,7 +1041,7 @@ struct ChannelManagerView: View {
             
             isPerformingLamedbOperation = false
             if ok {
-                state.showToast("Kaikki kanavat (\(count) kpl) poistettu pysyvästi boksista!")
+                state.showToast(L10n("Toast_AllChannelsDeletedPermanently", count))
                 selectedChannelIds.removeAll()
                 selectedChannel = nil
                 await loadInitialData()
@@ -1051,7 +1051,7 @@ struct ChannelManagerView: View {
             return
         }
         
-        lamedbProgressText = "Aloitetaan \(idsToDelete.count) kanavan poisto"
+        lamedbProgressText = L10n("Toast_DeletingSelectedChannels", idsToDelete.count)
         let (ok, count, msg) = await EnigmaBoxService.shared.deleteChannelsGloballyFromLamedb(
             ip: box.ip,
             channelRefs: idsToDelete,
@@ -1066,7 +1066,7 @@ struct ChannelManagerView: View {
         
         isPerformingLamedbOperation = false
         if ok {
-            state.showToast("\(count) kanavaa poistettu pysyvästi boksista!")
+            state.showToast(L10n("Toast_ChannelsDeletedPermanently", count))
             selectedChannelIds.removeAll()
             selectedChannel = nil
             await loadInitialData()
@@ -1079,7 +1079,7 @@ struct ChannelManagerView: View {
         guard let box = state.activeBox else { return }
         
         isPerformingLamedbOperation = true
-        lamedbProgressText = "Aloitetaan kaikkien kanavien tyhjennys boksista"
+        lamedbProgressText = L10n("Channels_ClearAllAction")
         
         let (ok, count, msg) = await EnigmaBoxService.shared.clearAllChannelsGloballyFromLamedb(
             ip: box.ip,
@@ -1094,7 +1094,7 @@ struct ChannelManagerView: View {
         
         isPerformingLamedbOperation = false
         if ok {
-            state.showToast("Kaikki kanavat (\(count) kpl) poistettu boksista!", isError: false)
+            state.showToast(L10n("Toast_AllChannelsDeletedPermanently", count), isError: false)
             selectedChannelIds.removeAll()
             selectedChannel = nil
             await loadInitialData()
@@ -1105,12 +1105,12 @@ struct ChannelManagerView: View {
     
     private func addChannelToBouquet(_ channel: Channel, bouquet: Bouquet) async {
         guard let box = state.activeBox else { return }
-        state.showToast("Lisätään kanavaa '\(channel.name)' listalle '\(bouquet.name)'")
+        state.showToast(L10n("Toast_AddingChannelToBouquet", channel.name, bouquet.name))
         let (ok, msg) = await EnigmaBoxService.shared.addChannelToBouquet(ip: box.ip, bouquetRef: bouquet.id, channelRef: channel.id, port: box.port, username: box.username, password: box.password)
         if ok {
-            state.showToast("Kanava '\(channel.name)' lisätty listalle '\(bouquet.name)'!")
+            state.showToast(L10n("Toast_ChannelAddedToBouquet", channel.name, bouquet.name))
         } else {
-            state.showToast("Lisäys epäonnistui: \(msg)", isError: true)
+            state.showToast(L10n("Toast_AddFailed", msg), isError: true)
         }
     }
     
@@ -1119,13 +1119,13 @@ struct ChannelManagerView: View {
         let ids = Array(selectedChannelIds)
         guard !ids.isEmpty else { return }
         
-        state.showToast("Lisätään \(ids.count) kanavaa listalle '\(bouquet.name)'")
+        state.showToast(L10n("Toast_AddingMultipleChannels", ids.count, bouquet.name))
         var successCount = 0
         for chId in ids {
             let (ok, _) = await EnigmaBoxService.shared.addChannelToBouquet(ip: box.ip, bouquetRef: bouquet.id, channelRef: chId, port: box.port, username: box.username, password: box.password)
             if ok { successCount += 1 }
         }
-        state.showToast("\(successCount) kanavaa lisätty listalle '\(bouquet.name)'!")
+        state.showToast(L10n("Toast_MultipleChannelsAdded", successCount, bouquet.name))
         selectedChannelIds.removeAll()
     }
     
@@ -1135,9 +1135,9 @@ struct ChannelManagerView: View {
         Task {
             let ok = await EnigmaBoxService.shared.zap(ip: box.ip, sRef: channel.id, port: box.port, username: box.username, password: box.password)
             if ok {
-                state.showToast("Vaihdettu: \(channel.name)")
+                state.showToast(L10n("Toast_Zapped", channel.name))
             } else {
-                state.showToast("Kanavan vaihto epäonnistui", isError: true)
+                state.showToast(L10n("Toast_ZapFailed"), isError: true)
             }
         }
     }
@@ -1147,9 +1147,9 @@ struct ChannelManagerView: View {
         Task {
             let ok = await EnigmaBoxService.shared.addTimerByEventId(ip: box.ip, sRef: event.sRef, eventId: event.id, port: box.port, username: box.username, password: box.password)
             if ok {
-                state.showToast("Tallennus ajastettu: \(event.title)!")
+                state.showToast(L10n("Toast_RecordingScheduled", event.title))
             } else {
-                state.showToast("Ajastuksen tallennus epäonnistui", isError: true)
+                state.showToast(L10n("Toast_RecordingScheduleFailed"), isError: true)
             }
         }
     }

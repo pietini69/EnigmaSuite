@@ -207,7 +207,7 @@ struct SupportView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    Text("EnigmaSuite v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2")")
+                    Text("EnigmaSuite v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.1")")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -230,6 +230,6 @@ struct SupportView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        state.showToast("\(name) -linkki kopioitu leikepöydälle!")
+        state.showToast(L10n("Toast_LinkCopied", name))
     }
 }

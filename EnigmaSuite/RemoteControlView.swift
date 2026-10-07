@@ -246,7 +246,7 @@ struct RemoteControlView: View {
                     VStack(spacing: 8) {
                         remoteButton(title: L10n("Channels_Up"), icon: "chevron.up") { sendKey("KEY_UP") }
                         HStack(spacing: 8) {
-                            remoteButton(title: "Left", icon: "chevron.left") { sendKey("KEY_LEFT") }
+                            remoteButton(title: L10n("Remote_Left"), icon: "chevron.left") { sendKey("KEY_LEFT") }
                             Button(action: { sendKey("KEY_OK") }) {
                                 Text("OK")
                                     .font(.headline.bold())
@@ -257,7 +257,7 @@ struct RemoteControlView: View {
                                     .overlay(Circle().stroke(Color.accentColor, lineWidth: 1.5))
                             }
                             .buttonStyle(.plain)
-                            remoteButton(title: "Right", icon: "chevron.right") { sendKey("KEY_RIGHT") }
+                            remoteButton(title: L10n("Remote_Right"), icon: "chevron.right") { sendKey("KEY_RIGHT") }
                         }
                         remoteButton(title: L10n("Channels_Down"), icon: "chevron.down") { sendKey("KEY_DOWN") }
                     }
@@ -368,16 +368,16 @@ struct RemoteControlView: View {
     // MARK: - Toiminnot
     private func sendKey(_ key: String) {
         guard let box = state.activeBox else {
-            state.showToast("Ei aktiivista boksia", isError: true)
+            state.showToast(L10n("Toast_NoActiveBox"), isError: true)
             return
         }
         Task {
             let ok = await EnigmaBoxService.shared.sendRemoteKey(ip: box.ip, key: key, port: box.port, username: box.username, password: box.password)
             if !ok {
-                state.showToast("Kaukosäädinkomento epäonnistui (\(key))", isError: true)
+                state.showToast(L10n("Toast_RemoteKeyFailed", key), isError: true)
             } else {
                 if key == "KEY_POWER" {
-                    state.showToast("Virtapainiketta painettu")
+                    state.showToast(L10n("Toast_PowerPressed"))
                     try? await Task.sleep(nanoseconds: 600_000_000)
                     await refreshNowPlaying()
                     await state.refreshBoxDetails(box)
@@ -422,9 +422,9 @@ struct RemoteControlView: View {
         isRefreshingLive = true
         if let img = await EnigmaBoxService.shared.grabScreenshot(ip: box.ip, port: box.port, username: box.username, password: box.password) {
             self.liveScreenshot = img
-            state.showToast("Kuvakaappaus päivitetty")
+            state.showToast(L10n("Toast_ScreenshotUpdated"))
         } else {
-            state.showToast("Kuvakaappaus epäonnistui", isError: true)
+            state.showToast(L10n("Toast_ScreenshotFailed"), isError: true)
         }
         isRefreshingLive = false
     }
@@ -451,9 +451,9 @@ struct RemoteControlView: View {
                         Task {
                             let ok = await EnigmaBoxService.shared.sendMessage(ip: box.ip, text: messageText, timeout: messageTimeout, port: box.port, username: box.username, password: box.password)
                             if ok {
-                                state.showToast("Message sent to TV!")
+                                state.showToast(L10n("Toast_MessageSent"))
                             } else {
-                                state.showToast("Failed to send message", isError: true)
+                                state.showToast(L10n("Toast_MessageFailed"), isError: true)
                             }
                             showMessageDialog = false
                             messageText = ""

@@ -185,7 +185,7 @@ struct BoxManagerView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "gearshape")
                             .foregroundColor(.secondary)
-                        Text("OS / Image:")
+                        Text(L10n("Boxes_OsImage"))
                             .font(.caption.bold())
                             .foregroundColor(.secondary)
                         Text(box.distro ?? (box.isOnline ? "..." : L10n("Common_NoConnection")))
@@ -310,7 +310,7 @@ struct BoxManagerView: View {
     private func executeTerminalCommand() {
         guard let box = state.activeBox else { return }
         isExecutingCommand = true
-        terminalOutput = LocalizationManager.shared.isFinnish ? "Suoritetaan: \(terminalCommand)...\n" : "Executing: \(terminalCommand)...\n"
+        terminalOutput = L10n("Terminal_Executing", terminalCommand) + "\n"
         
         Task {
             let (_, output) = await EnigmaBoxService.shared.executeTelnetCommand(

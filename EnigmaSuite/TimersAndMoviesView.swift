@@ -70,7 +70,7 @@ struct TimersAndMoviesView: View {
             if isLoading {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text("Loading...")
+                    Text(L10n("Common_Loading"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -299,10 +299,10 @@ struct TimersAndMoviesView: View {
         Task {
             let ok = await EnigmaBoxService.shared.deleteTimer(ip: box.ip, sRef: timer.sRef, begin: timer.begin, end: timer.end, port: box.port, username: box.username, password: box.password)
             if ok {
-                state.showToast("Ajastus poistettu: \(timer.name)")
+                state.showToast(L10n("Toast_TimerDeleted", timer.name))
                 await refreshCurrentTab()
             } else {
-                state.showToast("Ajastuksen poisto epäonnistui", isError: true)
+                state.showToast(L10n("Toast_TimerDeleteFailed"), isError: true)
             }
         }
     }
@@ -312,10 +312,10 @@ struct TimersAndMoviesView: View {
         Task {
             let ok = await EnigmaBoxService.shared.deleteAutoTimer(ip: box.ip, ruleId: rule.ruleId, port: box.port, username: box.username, password: box.password)
             if ok {
-                state.showToast("AutoTimer-sääntö poistettu")
+                state.showToast(L10n("Toast_AutoTimerDeleted"))
                 await refreshCurrentTab()
             } else {
-                state.showToast("Poisto epäonnistui", isError: true)
+                state.showToast(L10n("Toast_DeleteFailed"), isError: true)
             }
         }
     }
@@ -325,10 +325,10 @@ struct TimersAndMoviesView: View {
         Task {
             let ok = await EnigmaBoxService.shared.deleteMovie(ip: box.ip, sRef: movie.id, port: box.port, username: box.username, password: box.password)
             if ok {
-                state.showToast("Tallenne poistettu: \(movie.name)")
+                state.showToast(L10n("Toast_MovieDeleted", movie.name))
                 await refreshCurrentTab()
             } else {
-                state.showToast("Poisto epäonnistui", isError: true)
+                state.showToast(L10n("Toast_DeleteFailed"), isError: true)
             }
         }
     }
