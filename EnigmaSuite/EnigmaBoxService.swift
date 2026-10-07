@@ -1742,7 +1742,7 @@ final class EnigmaBoxService {
             password: box.password
         )
         guard success else {
-            return (nil, [MultibootSlotInfo(slot: 1, installedImage: box.distro, isCurrent: true)])
+            return (nil, [])
         }
         
         var currentSlot: Int? = nil
@@ -1773,7 +1773,7 @@ final class EnigmaBoxService {
         }
         
         if foundSlots.isEmpty {
-            return (1, [MultibootSlotInfo(slot: 1, installedImage: box.distro, isCurrent: true)])
+            return (nil, [])
         }
         
         var resultSlots: [MultibootSlotInfo] = []
@@ -2353,6 +2353,12 @@ if [ ! -x "$OFG_BIN" ]; then
     fi
 fi
 
+# Multiboot-tunnistus
+HAS_MULTIBOOT=0
+if ls /boot/STARTUP_* >/dev/null 2>&1; then
+    HAS_MULTIBOOT=1
+fi
+
 rm -rf "${WORK_DIR}/extracted"
 if [ -d "$ZIP_PATH" ]; then
     # Purettuna tallennettu varmuuskopio: käytetään kansiota sellaisenaan
@@ -2368,7 +2374,7 @@ else
     SRC_DIR="${WORK_DIR}/extracted"
 fi
 
-IMAGE_DIR=$(find "$SRC_DIR" -type f \\( -name "kernel_auto.bin" -o -name "vmlinux.bin" -o -name "rootfs.*" \\) -exec dirname {} \\; | head -n 1)
+IMAGE_DIR=$(find "$SRC_DIR" -type f \\( -name "kernel_auto.bin" -o -name "kernel.bin" -o -name "vmlinux.bin" -o -name "rootfs.*" \\) 2>/dev/null | grep -v "__MACOSX" | head -n 1 | while read -r f; do dirname "$f"; done)
 
 if [ -z "$IMAGE_DIR" ] || [ ! -d "$IMAGE_DIR" ]; then
     echo "STATUS:ERROR:0.0:Arkistosta ei löytynyt asennettavia tiedostoja (kernel / rootfs)." > "$STATUS_FILE"
@@ -2377,7 +2383,26 @@ fi
 
 echo "STATUS:FLASH:0.65:Kirjoitetaan image muistiin (ofgwrite)..." > "$STATUS_FILE"
 
-if [ "$TARGET_SLOT" != "0" ] && [ -n "$TARGET_SLOT" ]; then
+# Vu+ 4K erikoisosiot (initrd ja splash)
+INITRD_FILE=""
+[ -f "$IMAGE_DIR/initrd_auto.bin" ] && INITRD_FILE="$IMAGE_DIR/initrd_auto.bin"
+[ -z "$INITRD_FILE" ] && [ -f "$IMAGE_DIR/initrd.bin" ] && INITRD_FILE="$IMAGE_DIR/initrd.bin"
+if [ -n "$INITRD_FILE" ] && [ -e /dev/disk/by-partlabel/initrd ]; then
+    echo "Kirjoitetaan initrd..." >> "$LOG_FILE"
+    (dd if="$INITRD_FILE" of=/dev/disk/by-partlabel/initrd bs=1M 2>/dev/null || cat "$INITRD_FILE" > /dev/disk/by-partlabel/initrd) >> "$LOG_FILE" 2>&1
+    sync
+fi
+
+SPLASH_FILE=""
+[ -f "$IMAGE_DIR/splash_auto.bin" ] && SPLASH_FILE="$IMAGE_DIR/splash_auto.bin"
+[ -z "$SPLASH_FILE" ] && [ -f "$IMAGE_DIR/splash.bin" ] && SPLASH_FILE="$IMAGE_DIR/splash.bin"
+if [ -n "$SPLASH_FILE" ] && [ -e /dev/disk/by-partlabel/splash ]; then
+    echo "Kirjoitetaan splash..." >> "$LOG_FILE"
+    (dd if="$SPLASH_FILE" of=/dev/disk/by-partlabel/splash bs=1M 2>/dev/null || cat "$SPLASH_FILE" > /dev/disk/by-partlabel/splash) >> "$LOG_FILE" 2>&1
+    sync
+fi
+
+if [ "$HAS_MULTIBOOT" = "1" ] && [ "$TARGET_SLOT" != "0" ] && [ -n "$TARGET_SLOT" ]; then
     "$OFG_BIN" -r -k -m"${TARGET_SLOT}" "$IMAGE_DIR" >> "$LOG_FILE" 2>&1
 else
     "$OFG_BIN" -r -k "$IMAGE_DIR" >> "$LOG_FILE" 2>&1
@@ -2385,20 +2410,30 @@ fi
 
 RETVAL=$?
 if [ $RETVAL -ne 0 ]; then
-    echo "STATUS:ERROR:0.0:ofgwrite virhe (koodi ${RETVAL}). Katso loki." > "$STATUS_FILE"
+    ERR_MSG=$(grep -i '^Error:' "$LOG_FILE" 2>/dev/null | tail -n 1)
+    if [ -z "$ERR_MSG" ]; then
+        ERR_MSG="ofgwrite virhe (koodi ${RETVAL}). Katso loki."
+    fi
+    echo "STATUS:ERROR:0.0:${ERR_MSG}" > "$STATUS_FILE"
     exit 1
 fi
 
 rm -rf "${WORK_DIR}/extracted"
 
 if [ "$REBOOT_AFTER" = "true" ]; then
-    [ -f "/boot/STARTUP_${TARGET_SLOT}" ] && cp -f "/boot/STARTUP_${TARGET_SLOT}" /boot/STARTUP
+    if [ "$HAS_MULTIBOOT" = "1" ] && [ "$TARGET_SLOT" != "0" ] && [ -f "/boot/STARTUP_${TARGET_SLOT}" ]; then
+        cp -f "/boot/STARTUP_${TARGET_SLOT}" /boot/STARTUP
+    fi
     echo "STATUS:DONE:1.0:Asennus onnistui! Boksi käynnistyy uudelleen muutaman sekunnin kuluttua..." > "$STATUS_FILE"
     sync
     sleep 4
     reboot
 else
-    echo "STATUS:DONE:1.0:Image asennettu onnistuneesti slotiin ${TARGET_SLOT}!" > "$STATUS_FILE"
+    if [ "$HAS_MULTIBOOT" = "1" ] && [ "$TARGET_SLOT" != "0" ]; then
+        echo "STATUS:DONE:1.0:Image asennettu onnistuneesti slotiin ${TARGET_SLOT}!" > "$STATUS_FILE"
+    else
+        echo "STATUS:DONE:1.0:Image asennettu onnistuneesti!" > "$STATUS_FILE"
+    fi
 fi
 EOF
 chmod +x /tmp/enigmasuite_flash.sh

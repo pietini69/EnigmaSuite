@@ -143,7 +143,11 @@ struct ImageManagerView: View {
                 startFlashing()
             }
         } message: {
-            Text(String(format: l10n.t("Image_ConfirmFlashMsg"), selectedTargetSlot))
+            if multibootSlots.isEmpty || selectedTargetSlot == 0 {
+                Text(l10n.t("Image_ConfirmFlashSingleMsg"))
+            } else {
+                Text(String(format: l10n.t("Image_ConfirmFlashMsg"), selectedTargetSlot))
+            }
         }
         .alert(l10n.t("Image_ConfirmBootTitle"), isPresented: $showBootSlotAlert) {
             Button(l10n.t("Common_Cancel"), role: .cancel) {}
@@ -509,25 +513,41 @@ struct ImageManagerView: View {
                 Divider()
                 
                 // 2. Kohdeslotti
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(l10n.t("Image_TargetSlot"))
-                        .font(.subheadline.bold())
-                    
-                    Picker(L10n("Image_TargetSlotPicker"), selection: $selectedTargetSlot) {
-                        ForEach(multibootSlots) { s in
-                            Text(s.displayName).tag(s.slot)
+                if !multibootSlots.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(l10n.t("Image_TargetSlot"))
+                            .font(.subheadline.bold())
+                        
+                        Picker(L10n("Image_TargetSlotPicker"), selection: $selectedTargetSlot) {
+                            ForEach(multibootSlots) { s in
+                                Text(s.displayName).tag(s.slot)
+                            }
+                        }
+                        .frame(maxWidth: 380)
+                        
+                        if let cur = currentSlot, selectedTargetSlot == cur {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.circle")
+                                    .foregroundColor(.orange)
+                                Text(l10n.t("Image_TargetSlotWarning"))
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            }
                         }
                     }
-                    .frame(maxWidth: 380)
-                    
-                    if selectedTargetSlot == currentSlot {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.circle")
-                                .foregroundColor(.orange)
-                            Text(l10n.t("Image_TargetSlotWarning"))
-                                .font(.caption)
-                                .foregroundColor(.orange)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(l10n.t("Image_TargetSlot"))
+                            .font(.subheadline.bold())
+                        
+                        HStack(spacing: 8) {
+                            Image(systemName: "internaldrive")
+                                .foregroundColor(.secondary)
+                            Text(l10n.t("Image_SingleBootNotice"))
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
                         }
+                        .padding(.vertical, 4)
                     }
                 }
                 
@@ -626,9 +646,23 @@ struct ImageManagerView: View {
                 
                 Divider()
                 
-                VStack(spacing: 12) {
-                    ForEach(multibootSlots) { slot in
-                        multibootSlotCard(slot: slot)
+                if multibootSlots.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "square.dashed")
+                            .font(.system(size: 32))
+                            .foregroundColor(.secondary)
+                        Text(l10n.t("Image_NoMultibootSupport"))
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+                } else {
+                    VStack(spacing: 12) {
+                        ForEach(multibootSlots) { slot in
+                            multibootSlotCard(slot: slot)
+                        }
                     }
                 }
             }
@@ -726,6 +760,8 @@ struct ImageManagerView: View {
             self.selectedTargetSlot = cur
         } else if let first = slots.first {
             self.selectedTargetSlot = first.slot
+        } else {
+            self.selectedTargetSlot = 0
         }
         
         // 3. Asennustapa (ofgwrite tai Vu+:n USB-päivitys)
@@ -806,12 +842,13 @@ struct ImageManagerView: View {
         isFlashing = true
         flashProgress = 0.1
         flashStatusText = L10n("Image_StartingFlash")
+        let targetSlot = multibootSlots.isEmpty ? 0 : selectedTargetSlot
         
         Task {
             let (success, message) = await EnigmaBoxService.shared.flashImage(
                 box: box,
                 zipSource: source,
-                targetSlot: selectedTargetSlot,
+                targetSlot: targetSlot,
                 storage: storage,
                 rebootAfter: rebootAfterFlash
             ) { msg, progress in
