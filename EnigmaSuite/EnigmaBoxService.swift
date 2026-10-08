@@ -2402,19 +2402,46 @@ if [ -n "$SPLASH_FILE" ] && [ -e /dev/disk/by-partlabel/splash ]; then
     sync
 fi
 
+# Pysäytetään Enigma2 (init 4) ennen flashausta, jos asennetaan nykyisen järjestelmän päälle
+if [ "$HAS_MULTIBOOT" != "1" ] || [ "$TARGET_SLOT" = "0" ] || [ -z "$TARGET_SLOT" ]; then
+    echo "STATUS:FLASH:0.60:Pysäytetään Enigma2 (init 4)..." > "$STATUS_FILE"
+    echo "Pysäytetään Enigma2 (init 4)..." >> "$LOG_FILE"
+    init 4 || systemctl stop enigma2 2>/dev/null || true
+    sleep 3
+fi
+
+# Taustamonitori, joka päivittää tilatiedoston heti kun ofgwrite ilmoittaa onnistumisesta
+(
+    while true; do
+        if grep -q "Successfully flashed" "$LOG_FILE" 2>/dev/null; then
+            echo "STATUS:DONE:1.0:Asennus onnistui! Boksi käynnistyy uudelleen..." > "$STATUS_FILE"
+            break
+        fi
+        sleep 0.5
+    done
+) &
+MONITOR_PID=$!
+
 if [ "$HAS_MULTIBOOT" = "1" ] && [ "$TARGET_SLOT" != "0" ] && [ -n "$TARGET_SLOT" ]; then
     "$OFG_BIN" -r -k -m"${TARGET_SLOT}" "$IMAGE_DIR" >> "$LOG_FILE" 2>&1
 else
-    "$OFG_BIN" -r -k "$IMAGE_DIR" >> "$LOG_FILE" 2>&1
+    "$OFG_BIN" -r -k -f "$IMAGE_DIR" >> "$LOG_FILE" 2>&1
 fi
 
 RETVAL=$?
+kill $MONITOR_PID 2>/dev/null || true
+
 if [ $RETVAL -ne 0 ]; then
     ERR_MSG=$(grep -i '^Error:' "$LOG_FILE" 2>/dev/null | tail -n 1)
+    if [ -z "$ERR_MSG" ]; then
+        ERR_MSG=$(grep -i 'Error' "$LOG_FILE" 2>/dev/null | tail -n 1)
+    fi
     if [ -z "$ERR_MSG" ]; then
         ERR_MSG="ofgwrite virhe (koodi ${RETVAL}). Katso loki."
     fi
     echo "STATUS:ERROR:0.0:${ERR_MSG}" > "$STATUS_FILE"
+    # Palautetaan Enigma2 käyntiin virhetilanteessa
+    init 3 || systemctl start enigma2 2>/dev/null || true
     exit 1
 fi
 
@@ -2426,7 +2453,7 @@ if [ "$REBOOT_AFTER" = "true" ]; then
     fi
     echo "STATUS:DONE:1.0:Asennus onnistui! Boksi käynnistyy uudelleen muutaman sekunnin kuluttua..." > "$STATUS_FILE"
     sync
-    sleep 4
+    sleep 3
     reboot
 else
     if [ "$HAS_MULTIBOOT" = "1" ] && [ "$TARGET_SLOT" != "0" ]; then
@@ -2464,17 +2491,30 @@ rm -f /tmp/enigmasuite_flash.status /tmp/enigmasuite_flash.log
         // Seurataan edistymistä
         let startTime = Date()
         var currentProgress: Double = 0.45
+        var consecutiveFailures = 0
         
         while Date().timeIntervalSince(startTime) < 300 {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             
-            let (_, statusContent) = await executeTelnetCommand(
+            let (cmdOk, statusContent) = await executeTelnetCommand(
                 ip: box.ip,
                 command: "cat /tmp/enigmasuite_flash.status 2>/dev/null",
                 timeout: 4.0,
                 username: box.username,
                 password: box.password
             )
+            
+            if !cmdOk {
+                consecutiveFailures += 1
+                // Jos flashaus-vaihe oli jo saavutettu ja boksi katkaisee yhteyden,
+                // se tarkoittaa että ofgwrite suoritti asennuksen ja käynnisti boksin uudelleen (reboot)!
+                if currentProgress >= 0.60 && consecutiveFailures >= 2 {
+                    return (true, "Asennus valmis! Boksi käynnistyy uudelleen...")
+                }
+                continue
+            } else {
+                consecutiveFailures = 0
+            }
             
             if let statusLine = statusContent.components(separatedBy: .newlines).first(where: { $0.hasPrefix("STATUS:") }) {
                 let parts = statusLine.components(separatedBy: ":")
