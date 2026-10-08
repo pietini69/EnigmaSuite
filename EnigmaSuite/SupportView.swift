@@ -207,7 +207,7 @@ struct SupportView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    Text("EnigmaSuite v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.2.0")")
+                    Text("EnigmaSuite v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.3.0")")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
