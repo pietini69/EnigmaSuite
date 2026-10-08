@@ -619,6 +619,7 @@ struct ImageManagerView: View {
     private var canStartFlash: Bool {
         if isFlashing || isBackingUp { return false }
         if storageDevices.isEmpty { return false }
+        if let method = flashMethod, case .unavailable = method { return false }
         if flashSourceOption == .box {
             return selectedBoxBackupForFlash != nil
         } else {

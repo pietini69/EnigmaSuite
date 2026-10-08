@@ -2147,6 +2147,7 @@ elif [ -f /boot/zImage ]; then
 fi
 
 touch "${IMAGE_DIR}/reboot.update"
+touch "${IMAGE_DIR}/force.update"
 [ -f /usr/bin/mkupdate ] && cp /usr/bin/mkupdate "${IMAGE_DIR}/" || true
 
 echo "STATUS:ROOTFS:0.40:Pakataan tiedostojärjestelmä (rootfs.tar.bz2)..." > "$STATUS_FILE"
@@ -2410,6 +2411,12 @@ if [ "$HAS_MULTIBOOT" != "1" ] || [ "$TARGET_SLOT" = "0" ] || [ -z "$TARGET_SLOT
     sleep 3
 fi
 
+# Varmistetaan /newroot tmpfs -liitos, jota ofgwrite vaatii (check_env ja pivot_root)
+mkdir -p /newroot
+if ! grep -q " /newroot tmpfs " /proc/mounts; then
+    mount -t tmpfs tmpfs /newroot || true
+fi
+
 # Taustamonitori, joka päivittää tilatiedoston heti kun ofgwrite ilmoittaa onnistumisesta
 (
     while true; do
@@ -2435,6 +2442,9 @@ if [ $RETVAL -ne 0 ]; then
     ERR_MSG=$(grep -i '^Error:' "$LOG_FILE" 2>/dev/null | tail -n 1)
     if [ -z "$ERR_MSG" ]; then
         ERR_MSG=$(grep -i 'Error' "$LOG_FILE" 2>/dev/null | tail -n 1)
+    fi
+    if [ -z "$ERR_MSG" ]; then
+        ERR_MSG=$(tail -n 5 "$LOG_FILE" 2>/dev/null | grep -v '^$' | tail -n 1)
     fi
     if [ -z "$ERR_MSG" ]; then
         ERR_MSG="ofgwrite virhe (koodi ${RETVAL}). Katso loki."
@@ -2597,7 +2607,7 @@ rm -f /tmp/enigmasuite_flash.status /tmp/enigmasuite_flash.log
         // 1. Tarkistetaan onko ofgwrite jo boksissa /usr/bin tai /tmp
         let (checkOk, checkOut) = await executeTelnetCommand(
             ip: box.ip,
-            command: "[ -x /usr/bin/ofgwrite ] && echo USR_OK; [ -x /tmp/ofgwrite ] && echo TMP_OK",
+            command: "[ -x /usr/bin/ofgwrite ] && echo USR_OK; [ -x /tmp/ofgwrite ] && [ -s /tmp/ofgwrite ] && echo TMP_OK",
             timeout: 4.0,
             username: box.username,
             password: box.password
@@ -2678,6 +2688,33 @@ rm -f /tmp/enigmasuite_flash.status /tmp/enigmasuite_flash.log
         guard ok else { return .unavailable("Boksiin ei saatu yhteyttä asennustavan tarkistamiseksi.") }
 
         let lines = output.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+        let model = lines.first(where: { $0.hasPrefix("MODEL|") }).map { String($0.dropFirst(6)) } ?? ""
+        let hasMultiboot = lines.contains("MULTIBOOT")
+
+        // 1. Vu+ mallit ilman rinnakkaisia multiboot-slotteja:
+        // Vu+:n eMMC-arkkitehtuurissa ei ole laitetason monislot-multibootia.
+        // Aktiivisen käyttöjärjestelmän ylikirjoitus lennosta ofgwritella johtaa
+        // rootfs-purkuvirheeseen ja boksin jumiutumiseen. Vu+ vaatii turvallisen USB-päivityksen.
+        if !model.isEmpty && !hasMultiboot {
+            let usbs = lines.filter { $0.hasPrefix("USB|") }
+                .map { $0.split(separator: "|", maxSplits: 2).map(String.init) }
+                .filter { $0.count == 3 }
+            if let fat = usbs.first(where: { ["vfat", "msdos"].contains($0[1].lowercased()) }) {
+                return .usbUpdate(mount: fat[2], model: model)
+            }
+            if let other = usbs.first {
+                let msg = LocalizationManager.shared.isFinnish
+                    ? "Vu+ -boksit (\(model)) asennetaan turvallisesti Vu+:n USB-päivityksellä, jotta käynnissä olevaa järjestelmää ei ylikirjoiteta lennosta. USB-muisti \(other[2]) on muotoa \(other[1]). Alusta USB-muisti FAT32-muotoon (vähintään 1 Gt), liitä se boksiin ja yritä uudelleen."
+                    : "Vu+ receivers (\(model)) are safely updated via Vu+ USB update to prevent overwriting the running system live. USB drive \(other[2]) is formatted as \(other[1]). Format the USB drive as FAT32 (at least 1 GB), insert it into the box and try again."
+                return .unavailable(msg)
+            }
+            let msg = LocalizationManager.shared.isFinnish
+                ? "Vu+ -boksit (\(model)) asennetaan turvallisesti Vu+:n USB-päivityksellä, jotta käynnissä olevaa järjestelmää ei ylikirjoiteta lennosta. Liitä boksiin FAT32-muotoiltu USB-muisti (vähintään 1 Gt) ja yritä uudelleen."
+                : "Vu+ receivers (\(model)) are safely updated via Vu+ USB update to prevent overwriting the running system live. Please insert a FAT32-formatted USB drive (at least 1 GB) into the box and try again."
+            return .unavailable(msg)
+        }
+
+        // 2. Multiboot-boksit tai muut valmistajat:
         if lines.contains("OFG") { return .ofgwrite }
 
         let arch = lines.first(where: { $0.hasPrefix("ARCH|") }).map { String($0.dropFirst(5)).lowercased() } ?? ""
@@ -2687,21 +2724,10 @@ rm -f /tmp/enigmasuite_flash.status /tmp/enigmasuite_flash.log
             return .ofgwrite
         }
 
-        let model = lines.first(where: { $0.hasPrefix("MODEL|") }).map { String($0.dropFirst(6)) } ?? ""
-        let noOfgwrite = "Boksista puuttuu ofgwrite-ohjelma, jota imagen asennus tarvitsee. Asenna se boksin pakettienhallinnasta (opkg install ofgwrite) tai asenna image boksin omalla flash-toiminnolla."
-        // USB-päivitys vain Vu+-bokseille ilman multibootia (multiboot-slotteja käynnistyslatain ei tunne)
-        guard !model.isEmpty, !lines.contains("MULTIBOOT") else { return .unavailable(noOfgwrite) }
-
-        let usbs = lines.filter { $0.hasPrefix("USB|") }
-            .map { $0.split(separator: "|", maxSplits: 2).map(String.init) }
-            .filter { $0.count == 3 }
-        if let fat = usbs.first(where: { ["vfat", "msdos"].contains($0[1]) }) {
-            return .usbUpdate(mount: fat[2], model: model)
-        }
-        if let other = usbs.first {
-            return .unavailable("Boksista puuttuu ofgwrite, joten image asennetaan Vu+:n USB-päivityksellä. Se vaatii FAT32-muotoillun USB-muistin, mutta \(other[2]) on muotoa \(other[1]). Liitä boksiin FAT32-muotoiltu USB-muisti (vähintään 1 Gt) ja yritä uudelleen.")
-        }
-        return .unavailable("Boksista puuttuu ofgwrite, joten image asennetaan Vu+:n USB-päivityksellä. Liitä boksiin FAT32-muotoiltu USB-muisti (vähintään 1 Gt) ja yritä uudelleen.")
+        let noOfgwrite = LocalizationManager.shared.isFinnish
+            ? "Boksista puuttuu ofgwrite-ohjelma, jota imagen asennus tarvitsee. Asenna se boksin pakettienhallinnasta (opkg install ofgwrite) tai asenna image boksin omalla flash-toiminnolla."
+            : "Box lacks ofgwrite, which is required for flashing. Install it via package manager (opkg install ofgwrite) or use the box's built-in flash tool."
+        return .unavailable(noOfgwrite)
     }
 
     /// Siirtää paikallisen tiedoston boksille FTP:llä
@@ -2800,6 +2826,7 @@ mkdir -p "$ROOT/vuplus"
 mv "$IMG_DIR" "$TARGET" || fail "Imagen siirto paikalleen epäonnistui."
 rm -rf "$TMP"
 touch "$TARGET/reboot.update"
+touch "$TARGET/force.update"
 echo "$BOOT_ID" > "$TARGET/.enigmasuite_usbflash"
 sync
 
