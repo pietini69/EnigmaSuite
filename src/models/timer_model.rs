@@ -6,7 +6,7 @@ pub struct TimerItem {
     pub name: String,
     #[serde(default, rename = "servicename")]
     pub service_name: String,
-    #[serde(default, rename = "servicereference", alias = "sRef")]
+    #[serde(default, rename = "servicereference", alias = "sRef", alias = "serviceref")]
     pub service_ref: String,
     #[serde(default, rename = "description")]
     pub description: String,
@@ -23,16 +23,32 @@ pub struct TimerItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoTimerRule {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub match_pattern: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub service_name: String,
+    #[serde(default)]
+    pub service_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MovieItem {
     #[serde(default, rename = "eventname", alias = "title", alias = "name")]
     pub name: String,
     #[serde(default, rename = "servicename")]
     pub service_name: String,
-    #[serde(default, rename = "servicereference", alias = "sRef")]
+    #[serde(default, rename = "serviceref", alias = "servicereference", alias = "sRef", alias = "fullname")]
     pub service_ref: String,
     #[serde(default, rename = "description", alias = "descriptionExtended")]
     pub description: String,
-    #[serde(default, rename = "filename")]
+    #[serde(default, rename = "filename", alias = "filename_stripped")]
     pub filename: String,
     #[serde(default, rename = "filesize")]
     pub filesize: i64,

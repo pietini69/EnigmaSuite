@@ -1,9 +1,11 @@
+pub mod bootlogo_service;
 pub mod box_storage;
 pub mod media_player;
 pub mod network_scanner;
 pub mod openwebif;
 pub mod settings_sync;
 
+pub use bootlogo_service::*;
 pub use box_storage::*;
 pub use media_player::*;
 pub use network_scanner::*;

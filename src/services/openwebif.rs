@@ -1,4 +1,4 @@
-use crate::models::{Bouquet, Channel, CurrentPlaybackInfo, EnigmaBox, EpgEvent, MovieItem, TimerItem, TunerInfo};
+use crate::models::{AutoTimerRule, Bouquet, Channel, CurrentPlaybackInfo, EnigmaBox, EpgEvent, MovieItem, TimerItem, TunerInfo};
 use base64::Engine;
 use serde_json::Value;
 use std::time::Duration;
@@ -288,12 +288,128 @@ impl OpenWebifClient {
         let mut list = Vec::new();
         if let Some(movies) = val.get("movies").and_then(|v| v.as_array()) {
             for m in movies {
-                if let Ok(item) = serde_json::from_value::<MovieItem>(m.clone()) {
-                    list.push(item);
+                let name = m.get("eventname")
+                    .or_else(|| m.get("title"))
+                    .or_else(|| m.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let s_ref = m.get("serviceref")
+                    .or_else(|| m.get("servicereference"))
+                    .or_else(|| m.get("sRef"))
+                    .or_else(|| m.get("fullname"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let service_name = m.get("servicename").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let desc = m.get("description").or_else(|| m.get("descriptionExtended")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let filename = m.get("filename").or_else(|| m.get("filename_stripped")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let filesize = m.get("filesize").and_then(|v| v.as_i64()).unwrap_or(0);
+                let filesize_readable = m.get("filesize_readable").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let recording_time = m.get("recordingtime").and_then(|v| v.as_i64()).unwrap_or(0);
+                let length = m.get("length").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+                if !name.is_empty() || !s_ref.is_empty() {
+                    list.push(MovieItem {
+                        name,
+                        service_name,
+                        service_ref: s_ref,
+                        description: desc,
+                        filename,
+                        filesize,
+                        filesize_readable,
+                        recording_time,
+                        length,
+                    });
                 }
             }
         }
+
+        // Sort descending by recording time (newest first)
+        list.sort_by(|a, b| b.recording_time.cmp(&a.recording_time));
         Ok(list)
+    }
+
+    /// Fetches autotimer rules from /autotimer
+    pub fn fetch_autotimers(b: &EnigmaBox) -> Result<Vec<AutoTimerRule>, String> {
+        let resp = Self::build_get(b, "/autotimer").call().map_err(|e| e.to_string())?;
+        let text = resp.into_string().map_err(|e| e.to_string())?;
+
+        let mut list = Vec::new();
+        for block in text.split("<timer ").skip(1) {
+            let header = block.split('>').next().unwrap_or("");
+            let body = block.split("</timer>").next().unwrap_or("");
+
+            let extract_attr = |attr: &str| -> String {
+                let token = format!("{}=\"", attr);
+                if let Some(idx) = header.find(&token) {
+                    let rest = &header[idx + token.len()..];
+                    if let Some(end) = rest.find('"') {
+                        return rest[..end].to_string();
+                    }
+                }
+                String::new()
+            };
+
+            let id = extract_attr("id");
+            let mut name = extract_attr("name");
+            let match_pattern = extract_attr("match");
+            let enabled_str = extract_attr("enabled");
+            let enabled = enabled_str == "yes" || enabled_str == "1" || enabled_str == "true";
+
+            if name.is_empty() {
+                name = match_pattern.clone();
+            }
+
+            let extract_tag = |tag: &str| -> String {
+                let open = format!("<{}>", tag);
+                let close = format!("</{}>", tag);
+                if let Some(s) = body.find(&open) {
+                    let rest = &body[s + open.len()..];
+                    if let Some(e) = rest.find(&close) {
+                        return rest[..e].to_string();
+                    }
+                }
+                String::new()
+            };
+
+            let service_name = extract_tag("e2servicename");
+            let service_ref = extract_tag("e2servicereference");
+
+            if !id.is_empty() || !name.is_empty() {
+                list.push(AutoTimerRule {
+                    id,
+                    name,
+                    match_pattern,
+                    enabled,
+                    service_name,
+                    service_ref,
+                });
+            }
+        }
+
+        Ok(list)
+    }
+
+    /// Deletes an autotimer rule
+    pub fn delete_autotimer(b: &EnigmaBox, id: &str) -> Result<(), String> {
+        let path = format!("/autotimer/remove?id={}", urlencoding::encode(id));
+        let _ = Self::build_get(b, &path).call().map_err(|e| e.to_string())?;
+        let _ = Self::build_get(b, "/api/autotimer/reload").call();
+        Ok(())
+    }
+
+    /// Adds a new autotimer rule
+    pub fn add_autotimer(b: &EnigmaBox, name: &str, match_str: &str, sref: Option<&str>) -> Result<(), String> {
+        let mut path = format!("/autotimer/add?name={}&match={}&enabled=1", urlencoding::encode(name), urlencoding::encode(match_str));
+        if let Some(s) = sref {
+            path.push_str(&format!("&services={}", urlencoding::encode(s)));
+        }
+        let _ = Self::build_get(b, &path).call().map_err(|e| e.to_string())?;
+        let _ = Self::build_get(b, "/api/autotimer/reload").call();
+        Ok(())
     }
 
     /// Deletes a recorded movie
