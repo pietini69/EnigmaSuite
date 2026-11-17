@@ -16,14 +16,14 @@ pub enum NavigationTab {
 impl NavigationTab {
     pub fn icon(&self) -> &'static str {
         match self {
-            NavigationTab::BoxManager => "🎛️",
+            NavigationTab::BoxManager => "⚙",
             NavigationTab::Remote => "📱",
             NavigationTab::Channels => "📺",
-            NavigationTab::TimersAndMovies => "⏱️",
+            NavigationTab::TimersAndMovies => "⏱",
             NavigationTab::SettingsSync => "🔄",
             NavigationTab::Bootlogo => "🎨",
             NavigationTab::ImageManager => "💾",
-            NavigationTab::Support => "ℹ️",
+            NavigationTab::Support => "ℹ",
         }
     }
 }

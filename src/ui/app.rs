@@ -118,18 +118,18 @@ impl eframe::App for EnigmaSuiteApp {
 
                 // Quick Power actions
                 if let Some(b) = self.active_box() {
-                    if ui.button("⏻").on_hover_text("Vaihda valmiustilaa (Standby)").clicked() {
+                    if ui.button("⚡ Standby").on_hover_text("Vaihda valmiustilaa (Standby)").clicked() {
                         let _ = OpenWebifClient::set_powerstate(b, 0);
                     }
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // Language switcher
-                    if ui.selectable_label(self.language == Language::English, "🇬🇧 EN").clicked() {
+                    if ui.selectable_label(self.language == Language::English, "EN").on_hover_text("English").clicked() {
                         self.language = Language::English;
                         BoxStorage::save_prefs(self.active_box_id.as_deref(), self.selected_tab, self.language.code());
                     }
-                    if ui.selectable_label(self.language == Language::Finnish, "🇫🇮 FI").clicked() {
+                    if ui.selectable_label(self.language == Language::Finnish, "FI").on_hover_text("Suomi").clicked() {
                         self.language = Language::Finnish;
                         BoxStorage::save_prefs(self.active_box_id.as_deref(), self.selected_tab, self.language.code());
                     }
@@ -139,7 +139,7 @@ impl eframe::App for EnigmaSuiteApp {
         });
 
         // Left Navigation Sidebar
-        SidePanel::left("left_nav_panel").min_width(200.0).max_width(220.0).show(ctx, |ui| {
+        SidePanel::left("left_nav_panel").min_width(205.0).max_width(230.0).show(ctx, |ui| {
             ui.add_space(8.0);
             let tabs = [
                 NavigationTab::BoxManager,
@@ -154,18 +154,47 @@ impl eframe::App for EnigmaSuiteApp {
 
             for tab in tabs {
                 let is_sel = self.selected_tab == tab;
-                let text = format!("{} {}", tab.icon(), self.language.tab_title(tab));
-                
-                let btn = ui.add_sized(
-                    egui::Vec2::new(ui.available_width(), 34.0),
-                    egui::SelectableLabel::new(is_sel, RichText::new(text).size(13.0)),
+                let text = format!("{}  {}", tab.icon(), self.language.tab_title(tab));
+
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 35.0),
+                    egui::Sense::click(),
                 );
 
-                if btn.clicked() {
+                let is_hovered = response.hovered();
+                let bg_color = if is_sel {
+                    Color32::from_rgb(37, 99, 235) // Modern accent blue
+                } else if is_hovered {
+                    Color32::from_rgba_unmultiplied(255, 255, 255, 18)
+                } else {
+                    Color32::TRANSPARENT
+                };
+
+                ui.painter().rect_filled(rect, 5.0, bg_color);
+
+                let text_color = if is_sel {
+                    Color32::WHITE
+                } else if is_hovered {
+                    Color32::WHITE
+                } else {
+                    Color32::from_gray(215)
+                };
+
+                // Explicit left-aligned text with 12px margin
+                let text_pos = egui::pos2(rect.min.x + 12.0, rect.center().y);
+                ui.painter().text(
+                    text_pos,
+                    egui::Align2::LEFT_CENTER,
+                    &text,
+                    egui::FontId::proportional(13.5),
+                    text_color,
+                );
+
+                if response.clicked() {
                     self.selected_tab = tab;
                     BoxStorage::save_prefs(self.active_box_id.as_deref(), self.selected_tab, self.language.code());
                 }
-                ui.add_space(2.0);
+                ui.add_space(3.0);
             }
         });
 

@@ -37,7 +37,7 @@ impl TimersView {
     }
 
     pub fn render(&mut self, ui: &mut Ui, active_box: Option<&EnigmaBox>, _lang: Language) {
-        ui.heading("⏱️ Ajastukset & Tallenteet");
+        ui.heading("⏱ Ajastukset & Tallenteet");
 
         let b = match active_box {
             Some(b) => b,
@@ -48,7 +48,7 @@ impl TimersView {
         };
 
         ui.horizontal(|ui| {
-            if ui.selectable_label(self.active_subtab == 0, "⏱️ Ajastukset").clicked() {
+            if ui.selectable_label(self.active_subtab == 0, "⏱ Ajastukset").clicked() {
                 self.active_subtab = 0;
                 self.load_timers(b);
             }

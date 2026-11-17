@@ -1,6 +1,7 @@
 use egui::{Color32, RichText, Ui};
+use std::sync::mpsc::Receiver;
 use crate::models::EnigmaBox;
-use crate::services::{BoxStorage, OpenWebifClient};
+use crate::services::{BoxStorage, DiscoveredBox, NetworkScanner, OpenWebifClient};
 use crate::i18n::Language;
 
 pub struct BoxManagerView {
@@ -11,18 +12,25 @@ pub struct BoxManagerView {
     pub edit_pass: String,
     pub selected_box_id: Option<String>,
     pub status_msg: Option<(String, bool)>, // (message, is_error)
+
+    pub is_scanning: bool,
+    pub scan_receiver: Option<Receiver<DiscoveredBox>>,
+    pub discovered_boxes: Vec<DiscoveredBox>,
 }
 
 impl Default for BoxManagerView {
     fn default() -> Self {
         Self {
-            edit_name: "Olohuoneen Enigma2".to_string(),
-            edit_ip: "192.168.68.86".to_string(),
+            edit_name: "Vu+ Duo 4K SE".to_string(),
+            edit_ip: "192.168.68.79".to_string(),
             edit_port: "80".to_string(),
             edit_user: "root".to_string(),
             edit_pass: String::new(),
             selected_box_id: None,
             status_msg: None,
+            is_scanning: false,
+            scan_receiver: None,
+            discovered_boxes: Vec::new(),
         }
     }
 }
@@ -35,7 +43,16 @@ impl BoxManagerView {
         active_box_id: &mut Option<String>,
         _lang: Language,
     ) {
-        ui.heading("🎛️ Enigma2-laitteiden hallinta");
+        // Poll background network scanner
+        if let Some(rx) = &self.scan_receiver {
+            while let Ok(disc) = rx.try_recv() {
+                if !self.discovered_boxes.iter().any(|b| b.ip == disc.ip) {
+                    self.discovered_boxes.push(disc);
+                }
+            }
+        }
+
+        ui.heading("⚙ Enigma2-laitteiden hallinta");
         ui.label("Lisää, muokkaa ja testaa yhteyksiä kotiverkkosi Enigma2-digibokseihin.");
         ui.add_space(8.0);
 
@@ -46,7 +63,7 @@ impl BoxManagerView {
         }
 
         ui.columns(2, |cols| {
-            // Left column: Boxes List
+            // Left column: Boxes List & Discovery
             cols[0].group(|ui| {
                 ui.strong("Tallennetut vastaanottimet:");
                 ui.add_space(4.0);
@@ -100,6 +117,68 @@ impl BoxManagerView {
                     boxes.remove(del_idx);
                     BoxStorage::save_boxes(boxes);
                     self.status_msg = Some(("Boksi poistettu.".to_string(), false));
+                }
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                // Auto-Discovery Section
+                ui.horizontal(|ui| {
+                    let scan_btn_label = if self.is_scanning {
+                        "⏳ Etsitään verkosta..."
+                    } else {
+                        "🔍 Etsi boksit verkosta"
+                    };
+
+                    if ui.button(scan_btn_label).clicked() && !self.is_scanning {
+                        self.is_scanning = true;
+                        self.discovered_boxes.clear();
+
+                        let prefix = if let Some(dot_idx) = self.edit_ip.rfind('.') {
+                            format!("{}.", &self.edit_ip[..dot_idx])
+                        } else {
+                            "192.168.68.".to_string()
+                        };
+                        self.scan_receiver = Some(NetworkScanner::start_scan(prefix));
+                    }
+
+                    if self.is_scanning && ui.small_button("Pysäytä").clicked() {
+                        self.is_scanning = false;
+                        self.scan_receiver = None;
+                    }
+                });
+
+                if !self.discovered_boxes.is_empty() {
+                    ui.add_space(6.0);
+                    ui.strong("Löydetyt vastaanottimet lähiverkosta:");
+                    let mut add_disc_idx = None;
+
+                    for (d_idx, disc) in self.discovered_boxes.iter().enumerate() {
+                        let already_added = boxes.iter().any(|b| b.ip == disc.ip);
+                        ui.horizontal(|ui| {
+                            let label = format!("• {} ({}) - {}", disc.model, disc.brand, disc.ip);
+                            ui.label(label);
+                            if already_added {
+                                ui.colored_label(Color32::from_gray(140), "Tallennettu");
+                            } else if ui.small_button("➕ Lisää").clicked() {
+                                add_disc_idx = Some(d_idx);
+                            }
+                        });
+                    }
+
+                    if let Some(idx) = add_disc_idx {
+                        let disc = &self.discovered_boxes[idx];
+                        let mut nb = EnigmaBox::new(&format!("Vu+ {}", disc.model), &disc.ip);
+                        nb.port = disc.port;
+                        nb.model = Some(disc.model.clone());
+                        nb.is_online = true;
+                        let id = nb.id.clone();
+                        boxes.push(nb);
+                        BoxStorage::save_boxes(boxes);
+                        *active_box_id = Some(id);
+                        self.status_msg = Some((format!("Lisätty {} ({}) ja valittu aktiiviseksi!", disc.model, disc.ip), false));
+                    }
                 }
             });
 

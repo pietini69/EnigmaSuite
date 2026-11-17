@@ -83,7 +83,7 @@ impl RemoteView {
 
                 // Row 1: Power, Mute, TV
                 ui.horizontal(|ui| {
-                    if ui.add_sized(btn_size, egui::Button::new(RichText::new("⏻ Virta").color(Color32::RED))).clicked() {
+                    if ui.add_sized(btn_size, egui::Button::new(RichText::new("⚡ Virta").color(Color32::RED).strong())).clicked() {
                         let _ = OpenWebifClient::send_remote_key(b, "KEY_POWER");
                     }
                     if ui.add_sized(btn_size, egui::Button::new("🔇 Mykistys")).clicked() {
@@ -194,8 +194,8 @@ impl RemoteView {
                     if ui.add_sized(med_btn, egui::Button::new("▶")).clicked() { let _ = OpenWebifClient::send_remote_key(b, "KEY_PLAY"); }
                     if ui.add_sized(med_btn, egui::Button::new("⏸")).clicked() { let _ = OpenWebifClient::send_remote_key(b, "KEY_PAUSE"); }
                     if ui.add_sized(med_btn, egui::Button::new("⏩")).clicked() { let _ = OpenWebifClient::send_remote_key(b, "KEY_FASTFORWARD"); }
-                    if ui.add_sized(med_btn, egui::Button::new("⏹")).clicked() { let _ = OpenWebifClient::send_remote_key(b, "KEY_STOP"); }
-                    if ui.add_sized(med_btn, egui::Button::new(RichText::new("⏺").color(Color32::RED))).clicked() { let _ = OpenWebifClient::send_remote_key(b, "KEY_RECORD"); }
+                    if ui.add_sized(med_btn, egui::Button::new("■")).clicked() { let _ = OpenWebifClient::send_remote_key(b, "KEY_STOP"); }
+                    if ui.add_sized(med_btn, egui::Button::new(RichText::new("●").color(Color32::RED))).clicked() { let _ = OpenWebifClient::send_remote_key(b, "KEY_RECORD"); }
                 });
             });
 

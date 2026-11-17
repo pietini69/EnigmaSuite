@@ -39,8 +39,11 @@ impl BoxStorage {
             }
         }
 
-        // Default initial box if none exist
-        vec![EnigmaBox::new("Oma Enigma2", "192.168.68.86")]
+        // Default initial boxes if none exist
+        vec![
+            EnigmaBox::new("Vu+ Duo 4K SE", "192.168.68.79"),
+            EnigmaBox::new("Vu+ Duo4kLite", "192.168.68.84"),
+        ]
     }
 
     pub fn save_boxes(boxes: &[EnigmaBox]) {

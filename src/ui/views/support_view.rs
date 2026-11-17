@@ -12,7 +12,7 @@ impl Default for SupportView {
 
 impl SupportView {
     pub fn render(&mut self, ui: &mut Ui, _active_box: Option<&EnigmaBox>, _lang: Language) {
-        ui.heading("ℹ️ Tietoja & Tuki");
+        ui.heading("ℹ Tietoja & Tuki");
         ui.add_space(8.0);
 
         ui.group(|ui| {

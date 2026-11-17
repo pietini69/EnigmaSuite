@@ -171,7 +171,7 @@ impl ChannelsView {
                                 if !ev.description.is_empty() {
                                     ui.label(&ev.description);
                                 }
-                                if ui.small_button("⏱️ Lisää ajastus").clicked() {
+                                if ui.small_button("⏱ Lisää ajastus").clicked() {
                                     let _ = OpenWebifClient::add_timer_by_event_id(b, self.selected_channel_ref.as_deref().unwrap_or(""), ev.id);
                                 }
                             });
