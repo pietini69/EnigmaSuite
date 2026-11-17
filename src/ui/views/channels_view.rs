@@ -153,7 +153,8 @@ impl ChannelsView {
                     }
                     if let Some(sref) = stream_target {
                         let stream_url = b.stream_url(&sref);
-                        let _ = open::that(&stream_url);
+                        let title = self.channels.iter().find(|c| c.s_ref == sref).map(|c| c.name.as_str()).unwrap_or("TV Stream");
+                        crate::services::MediaPlayer::play_stream(&stream_url, title);
                     }
                 });
             });

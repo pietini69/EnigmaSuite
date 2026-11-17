@@ -119,7 +119,7 @@ impl TimersView {
                             
                             if ui.small_button("▶ Toista (VLC)").clicked() {
                                 let stream_url = b.stream_url(&m.service_ref);
-                                let _ = open::that(&stream_url);
+                                crate::services::MediaPlayer::play_stream(&stream_url, &m.name);
                             }
                             if ui.small_button("❌ Poista").clicked() {
                                 to_delete = Some(m.service_ref.clone());

@@ -165,7 +165,7 @@ impl eframe::App for EnigmaSuiteApp {
                 let bg_color = if is_sel {
                     Color32::from_rgb(37, 99, 235) // Modern accent blue
                 } else if is_hovered {
-                    Color32::from_rgba_unmultiplied(255, 255, 255, 18)
+                    Color32::from_rgb(220, 230, 245) // Subtle light blue highlight on hover
                 } else {
                     Color32::TRANSPARENT
                 };
@@ -174,14 +174,12 @@ impl eframe::App for EnigmaSuiteApp {
 
                 let text_color = if is_sel {
                     Color32::WHITE
-                } else if is_hovered {
-                    Color32::WHITE
                 } else {
-                    Color32::from_gray(215)
+                    Color32::from_rgb(15, 23, 42) // Solid, crisp, sharp dark black text
                 };
 
-                // Explicit left-aligned text with 12px margin
-                let text_pos = egui::pos2(rect.min.x + 12.0, rect.center().y);
+                // Explicit left-aligned text with 14px margin
+                let text_pos = egui::pos2(rect.min.x + 14.0, rect.center().y);
                 ui.painter().text(
                     text_pos,
                     egui::Align2::LEFT_CENTER,
