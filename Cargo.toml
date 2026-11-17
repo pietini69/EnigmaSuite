@@ -1,0 +1,29 @@
+[package]
+name = "enigma_suite"
+version = "2.0.0"
+edition = "2021"
+authors = ["Niko Pietinen"]
+description = "EnigmaSuite V2 – Fast, native cross-platform Enigma2 receiver management, channel editing, streaming and remote control in Rust."
+
+[dependencies]
+eframe = "0.31"
+egui = "0.31"
+egui_extras = { version = "0.31", features = ["all_loaders"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ureq = { version = "2.10", features = ["tls", "json"] }
+rfd = "0.15"
+open = "5.3"
+dirs = "6.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+log = "0.4"
+env_logger = "0.11"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+base64 = "0.22"
+urlencoding = "2.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
