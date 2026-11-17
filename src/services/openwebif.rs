@@ -35,7 +35,11 @@ impl OpenWebifClient {
         if let Some(model) = info.get("model").and_then(|v| v.as_str()) {
             b.model = Some(model.to_string());
         }
-        if let Some(distro) = info.get("distro").and_then(|v| v.as_str()) {
+        if let Some(distro) = info.get("imagedistro")
+            .or_else(|| info.get("friendlyimagedistro"))
+            .or_else(|| info.get("distro"))
+            .and_then(|v| v.as_str())
+        {
             b.distro = Some(distro.to_string());
         }
 

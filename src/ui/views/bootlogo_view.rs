@@ -3,14 +3,15 @@ use egui::{Color32, RichText, Ui, Vec2};
 use crate::models::EnigmaBox;
 use crate::i18n::Language;
 use crate::services::{
-    BootlogoService, BootlogoType, BootlogoResolution, ScalingMode, OpenWebifClient
+    BootlogoService, BootlogoType, BootlogoResolution, ScalingMode, EnigmaImagePreset, OpenWebifClient
 };
 
 pub struct BootlogoView {
     pub selected_type_idx: usize,
     pub selected_res_idx: usize,
     pub selected_scaling_idx: usize,
-    pub remote_directory: String,
+    pub selected_preset: EnigmaImagePreset,
+    pub custom_remote_directory: String,
     pub restart_gui_after_upload: bool,
     pub selected_image_path: Option<String>,
     pub image_dimensions: Option<(u32, u32)>,
@@ -25,7 +26,8 @@ impl Default for BootlogoView {
             selected_type_idx: 0,
             selected_res_idx: 0, // 1080p FHD
             selected_scaling_idx: 0, // Fit & Pad
-            remote_directory: "/usr/share/vuplus-bootlogo".to_string(),
+            selected_preset: EnigmaImagePreset::Auto,
+            custom_remote_directory: "/usr/share/enigma2".to_string(),
             restart_gui_after_upload: true,
             selected_image_path: None,
             image_dimensions: None,
@@ -37,6 +39,18 @@ impl Default for BootlogoView {
 }
 
 impl BootlogoView {
+    pub fn get_active_remote_dir(&self, active_box: Option<&EnigmaBox>) -> String {
+        if self.selected_preset == EnigmaImagePreset::Custom {
+            if self.custom_remote_directory.trim().is_empty() {
+                "/usr/share/enigma2".to_string()
+            } else {
+                self.custom_remote_directory.trim().to_string()
+            }
+        } else {
+            self.selected_preset.resolve_path(active_box.and_then(|b| b.distro.as_deref()))
+        }
+    }
+
     pub fn load_image_preview(&mut self, ctx: &egui::Context, path_str: &str) -> Result<(), String> {
         let path = Path::new(path_str);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
@@ -167,15 +181,15 @@ impl BootlogoView {
                     if ui.button("📥 Lataa boksista").clicked() {
                         let b_type = BootlogoType::all()[self.selected_type_idx];
                         let filename = b_type.filename();
-                        let remote_path = format!("{}/{}", self.remote_directory.trim_end_matches('/'), filename);
+                        let preferred_dir = self.get_active_remote_dir(Some(b));
                         let temp_local = std::env::temp_dir().join(format!("remote_{}", filename));
 
-                        match BootlogoService::download_bootlogo_ftp(&b.ip, &b.username, &b.password, &remote_path, &temp_local) {
-                            Ok(()) => {
+                        match BootlogoService::download_bootlogo_with_fallback(&b.ip, &b.username, &b.password, filename, &preferred_dir, &temp_local) {
+                            Ok(found_path) => {
                                 let ctx = ui.ctx().clone();
                                 match self.load_image_preview(&ctx, &temp_local.to_string_lossy()) {
                                     Ok(()) => {
-                                        self.status_msg = Some(format!("Ladattu boksista nykyinen {}!", filename));
+                                        self.status_msg = Some(format!("Ladattu boksista: {}!", found_path));
                                         self.is_error = false;
                                     }
                                     Err(e) => {
@@ -185,7 +199,7 @@ impl BootlogoView {
                                 }
                             }
                             Err(e) => {
-                                self.status_msg = Some(format!("Lataus boksista epäonnistui: {}", e));
+                                self.status_msg = Some(e);
                                 self.is_error = true;
                             }
                         }
@@ -258,23 +272,41 @@ impl BootlogoView {
                         });
                 });
 
+                // Image Preset / Folder difference handling
+                let active_dir = self.get_active_remote_dir(Some(b));
+                let detected_distro = b.distro.as_deref().unwrap_or("Tuntematon");
+                let preset_label = match self.selected_preset {
+                    EnigmaImagePreset::Auto => format!("🤖 Automaattinen (Tunnistettu: {} → {})", detected_distro, active_dir),
+                    _ => self.selected_preset.label().to_string(),
+                };
+
                 ui.horizontal(|ui| {
-                    ui.label("Kohdehakemisto boksissa:");
-                    let dirs = [
-                        "/usr/share/vuplus-bootlogo",
-                        "/usr/share/enigma2",
-                        "/etc/enigma2",
-                    ];
-                    egui::ComboBox::from_id_salt("bootlogo_dir_combo")
-                        .selected_text(&self.remote_directory)
+                    ui.label("Image-jakelu / Kohde:");
+                    egui::ComboBox::from_id_salt("bootlogo_preset_combo")
+                        .selected_text(&preset_label)
                         .show_ui(ui, |ui| {
-                            for d in dirs {
-                                if ui.selectable_label(self.remote_directory == d, d).clicked() {
-                                    self.remote_directory = d.to_string();
+                            for p in EnigmaImagePreset::all() {
+                                let l = match p {
+                                    EnigmaImagePreset::Auto => format!("🤖 Automaattinen (Tunnistettu: {} → {})", detected_distro, p.resolve_path(b.distro.as_deref())),
+                                    _ => p.label().to_string(),
+                                };
+                                if ui.selectable_label(self.selected_preset == *p, l).clicked() {
+                                    self.selected_preset = *p;
                                 }
                             }
                         });
                 });
+
+                if self.selected_preset == EnigmaImagePreset::Custom {
+                    ui.horizontal(|ui| {
+                        ui.label("Mukautettu kansio:");
+                        ui.text_edit_singleline(&mut self.custom_remote_directory);
+                    });
+                } else {
+                    ui.label(RichText::new(format!("Aktiivinen kohdekansio boksissa: {}", active_dir)).color(Color32::from_rgb(59, 130, 246)).small());
+                }
+
+                ui.label(RichText::new("💡 VTi käyttää kansiota /usr/share/vuplus-bootlogo. OpenATV ja PurE2: /etc/enigma2 säilyy ohjelmistopäivityksissä.").small().color(Color32::from_rgb(100, 116, 139)));
 
                 ui.checkbox(&mut self.restart_gui_after_upload, "Käynnistä Enigma2 käyttöliittymä uudelleen asennuksen jälkeen");
             });
@@ -291,7 +323,8 @@ impl BootlogoView {
                             let src_path = Path::new(src_str);
                             let b_type = BootlogoType::all()[self.selected_type_idx];
                             let filename = b_type.filename();
-                            let remote_path = format!("{}/{}", self.remote_directory.trim_end_matches('/'), filename);
+                            let target_dir = self.get_active_remote_dir(Some(b));
+                            let remote_path = format!("{}/{}", target_dir.trim_end_matches('/'), filename);
                             let ext = src_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
 
                             let temp_mvi = std::env::temp_dir().join(filename);
@@ -321,7 +354,13 @@ impl BootlogoView {
 
                             match BootlogoService::upload_bootlogo_ftp(&b.ip, &b.username, &b.password, &mvi_to_upload, &remote_path) {
                                 Ok(()) => {
-                                    let mut msg = format!("✓ Käynnistyskuva {} asennettu onnistuneesti kansioon {}!", filename, self.remote_directory);
+                                    // Mirroring to /usr/share/enigma2 if /etc/enigma2 was selected, to cover both
+                                    if target_dir == "/etc/enigma2" {
+                                        let mirror_path = format!("/usr/share/enigma2/{}", filename);
+                                        let _ = BootlogoService::upload_bootlogo_ftp(&b.ip, &b.username, &b.password, &mvi_to_upload, &mirror_path);
+                                    }
+
+                                    let mut msg = format!("✓ Käynnistyskuva {} asennettu onnistuneesti kohteeseen {}!", filename, target_dir);
                                     if self.restart_gui_after_upload {
                                         let _ = OpenWebifClient::set_powerstate(b, 3);
                                         msg.push_str(" Enigma2 GUI käynnistetään uudelleen...");
@@ -385,6 +424,35 @@ impl BootlogoView {
                             self.is_error = true;
                         }
                     }
+
+                    // Newly requested button: Save as JPG
+                    if ui.button("🖼 Tallenna .jpg koneelle...").clicked() {
+                        if let Some(src_str) = &self.selected_image_path {
+                            let src_path = Path::new(src_str);
+                            let b_type = BootlogoType::all()[self.selected_type_idx];
+                            let default_name = format!("{}.jpg", b_type.filename().trim_end_matches(".mvi"));
+
+                            if let Some(dest_path) = rfd::FileDialog::new()
+                                .set_file_name(&default_name)
+                                .add_filter("JPEG-kuva", &["jpg", "jpeg"])
+                                .save_file()
+                            {
+                                match BootlogoService::save_as_jpeg(src_path, &dest_path) {
+                                    Ok(()) => {
+                                        self.status_msg = Some(format!("✓ Kuva tallennettu JPG-muodossa kohteeseen: {}", dest_path.display()));
+                                        self.is_error = false;
+                                    }
+                                    Err(e) => {
+                                        self.status_msg = Some(format!("JPEG-tallennus epäonnistui: {}", e));
+                                        self.is_error = true;
+                                    }
+                                }
+                            }
+                        } else {
+                            self.status_msg = Some("Valitse ensin kuva koneelta, kaappaa se televisiosta tai lataa boksista!".to_string());
+                            self.is_error = true;
+                        }
+                    }
                 });
 
                 ui.add_space(4.0);
@@ -392,11 +460,11 @@ impl BootlogoView {
                     if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                         let mut count = 0;
                         let mut errors = 0;
+                        let preferred_dir = self.get_active_remote_dir(Some(b));
                         for t in BootlogoType::all() {
                             let fn_name = t.filename();
-                            let remote_p = format!("{}/{}", self.remote_directory.trim_end_matches('/'), fn_name);
                             let local_p = folder.join(fn_name);
-                            if BootlogoService::download_bootlogo_ftp(&b.ip, &b.username, &b.password, &remote_p, &local_p).is_ok() {
+                            if BootlogoService::download_bootlogo_with_fallback(&b.ip, &b.username, &b.password, fn_name, &preferred_dir, &local_p).is_ok() {
                                 count += 1;
                             } else {
                                 errors += 1;

@@ -44,6 +44,60 @@ impl BootlogoType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnigmaImagePreset {
+    Auto,           // Automaattinen (Tunnista boksista)
+    VTi,            // VTi (Vu+ Team Image) -> /usr/share/vuplus-bootlogo
+    OpenAtvEtc,     // OpenATV / PurE2 (Käyttäjäkansio /etc/enigma2 - säilyy päivityksissä)
+    OpenAtvShare,   // OpenATV / OpenPLi / OpenViX (Järjestelmä /usr/share/enigma2)
+    Custom,         // Mukautettu kansio
+}
+
+impl EnigmaImagePreset {
+    pub fn all() -> &'static [EnigmaImagePreset] {
+        &[
+            EnigmaImagePreset::Auto,
+            EnigmaImagePreset::VTi,
+            EnigmaImagePreset::OpenAtvEtc,
+            EnigmaImagePreset::OpenAtvShare,
+            EnigmaImagePreset::Custom,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            EnigmaImagePreset::Auto => "🤖 Automaattinen (Boksin imagen mukaan)",
+            EnigmaImagePreset::VTi => "VTi (Vu+ Team Image) [/usr/share/vuplus-bootlogo]",
+            EnigmaImagePreset::OpenAtvEtc => "OpenATV / PurE2 (Käyttäjäkansio /etc/enigma2, säilyy päivityksissä)",
+            EnigmaImagePreset::OpenAtvShare => "OpenATV / OpenPLi / OpenViX (Järjestelmä /usr/share/enigma2)",
+            EnigmaImagePreset::Custom => "📁 Mukautettu kansio...",
+        }
+    }
+
+    pub fn resolve_path(&self, distro: Option<&str>) -> String {
+        match self {
+            EnigmaImagePreset::Auto => {
+                if let Some(d) = distro {
+                    let d_low = d.to_lowercase();
+                    if d_low.contains("vti") {
+                        "/usr/share/vuplus-bootlogo".to_string()
+                    } else if d_low.contains("atv") || d_low.contains("pure") {
+                        "/etc/enigma2".to_string()
+                    } else {
+                        "/usr/share/enigma2".to_string()
+                    }
+                } else {
+                    "/usr/share/vuplus-bootlogo".to_string()
+                }
+            }
+            EnigmaImagePreset::VTi => "/usr/share/vuplus-bootlogo".to_string(),
+            EnigmaImagePreset::OpenAtvEtc => "/etc/enigma2".to_string(),
+            EnigmaImagePreset::OpenAtvShare => "/usr/share/enigma2".to_string(),
+            EnigmaImagePreset::Custom => "/usr/share/enigma2".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalingMode {
     FitPad,  // Keep aspect ratio, pad with black
     Crop,    // Keep aspect ratio, crop excess
@@ -174,7 +228,20 @@ impl BootlogoService {
         if status.success() && output_image.exists() {
             Ok(())
         } else {
-            Err("MVI-esikatselukuvan muodostus epäonnistui.".to_string())
+            Err("MVI-kuvan purku epäonnistui.".to_string())
+        }
+    }
+
+    /// Saves any source image or MVI file as a standard JPEG file
+    pub fn save_as_jpeg(source: &Path, dest_jpg: &Path) -> Result<(), String> {
+        let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        if ext == "mvi" {
+            Self::convert_mvi_to_image(source, dest_jpg)
+        } else {
+            let img = image::open(source).map_err(|e| format!("Kuvan lukeminen epäonnistui: {}", e))?;
+            let rgb = img.to_rgb8();
+            rgb.save_with_format(dest_jpg, image::ImageFormat::Jpeg)
+                .map_err(|e| format!("JPEG-tallennus epäonnistui: {}", e))
         }
     }
 
@@ -199,6 +266,32 @@ impl BootlogoService {
         } else {
             Err(format!("Lataus epäonnistui osoitteesta {}", ftp_url))
         }
+    }
+
+    /// Downloads a bootlogo directly from Enigma2 box via FTP, trying preferred path and known image fallback directories
+    pub fn download_bootlogo_with_fallback(
+        ip: &str,
+        user: &str,
+        pass: &str,
+        filename: &str,
+        preferred_dir: &str,
+        local_file: &Path,
+    ) -> Result<String, String> {
+        let mut dirs_to_try = vec![preferred_dir.trim_end_matches('/')];
+        for fallback in &["/usr/share/vuplus-bootlogo", "/etc/enigma2", "/usr/share/enigma2", "/usr/share"] {
+            if !dirs_to_try.contains(fallback) {
+                dirs_to_try.push(fallback);
+            }
+        }
+
+        for dir in dirs_to_try {
+            let remote_path = format!("{}/{}", dir, filename);
+            if Self::download_bootlogo_ftp(ip, user, pass, &remote_path, local_file).is_ok() {
+                return Ok(remote_path);
+            }
+        }
+
+        Err(format!("Käynnistyskuvaa '{}' ei löytynyt boksin tunnetuista kansioista (kokeiltu: VTi, OpenATV, OpenPLi).", filename))
     }
 
     /// Uploads an MVI bootlogo to Enigma2 box via FTP
